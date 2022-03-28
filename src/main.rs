@@ -8,16 +8,60 @@ use piston::event_loop::{EventSettings, Events};
 use piston::input::{RenderArgs, RenderEvent, UpdateArgs, UpdateEvent, PressEvent, ReleaseEvent, Key, Button};
 use piston::window::WindowSettings;
 
-#[derive(Copy, Clone, Debug)]
+static COLOR_TABLE: [[f32; 4]; 10] = [
+    [0.6705882352941176, 0.5607843137254902, 0.5647058823529412, 1.0],
+    [0.7137254901960784, 0.5333333333333333, 0.2235294117647059, 1.0],
+    [0.6705882352941176, 0.7137254901960784, 0.6862745098039216, 1.0],
+    [0.9058823529411765, 0.5568627450980392, 0.7254901960784313, 1.0],
+    [0.4823529411764706, 0.30196078431372547, 0.396078431372549, 1.0],
+    [0.403921568627451, 0.8862745098039215, 0.027450980392156862, 1.0],
+    [0.6745098039215687, 0.32941176470588235, 0.0784313725490196, 1.0],
+    [0.9411764705882353, 0.6823529411764706, 0.8431372549019608, 1.0],
+    [0.7176470588235294, 0.32941176470588235, 0.1568627450980392, 1.0],
+    [0.6274509803921569, 0.3137254901960784, 0.011764705882352941, 1.0],
+];
+
+#[derive(Copy, Clone, PartialEq, Debug)]
 struct MyVertex {
     x: f32,
     y: f32,
+}
+
+impl std::ops::Sub for MyVertex {
+    type Output = MyVertex;
+
+    fn sub(self, rhs: MyVertex) -> Self {
+        let x = self.x - rhs.x;
+        let y = self.y - rhs.y;
+
+        MyVertex { x, y }
+    }
+
 }
 
 #[derive(Copy, Clone, Debug)]
 struct MyLine {
     start_vertex: usize,
     end_vertex: usize,
+}
+
+#[derive(Copy, Clone, Debug)]
+struct MyLineDef {
+    line: MyLine,
+    front_sidedef: Option<usize>,
+    back_sidedef: Option<usize>,
+}
+
+#[derive(Copy, Clone, Debug)]
+struct MySidedef {
+    sector: usize,
+}
+
+#[derive(Clone, Debug)]
+struct MySector {
+    floor_height: usize,
+    ceiling_height: usize,
+    lines: Vec<MyLine>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -40,7 +84,9 @@ pub struct App {
     zoom_out: bool,
 
     vertices: Vec<MyVertex>,
-    lines: Vec<MyLine>,
+    lines: Vec<MyLineDef>,
+    sidedefs: Vec<MySidedef>,
+    sectors: Vec<MySector>,
     segments: Vec<MySegments>
 }
 
@@ -187,9 +233,54 @@ fn test_wad_data(app: &mut App) {
             let start_vertex = i16::from_le_bytes(data[0..2].try_into().unwrap());
             let end_vertex = i16::from_le_bytes(data[2..4].try_into().unwrap());
 
-            app.lines.push(MyLine {
-                start_vertex: start_vertex.try_into().unwrap(),
-                end_vertex: end_vertex.try_into().unwrap(),
+            let front_sidedef = i16::from_le_bytes(data[10..12].try_into().unwrap());
+            let back_sidedef = i16::from_le_bytes(data[12..14].try_into().unwrap());
+
+            app.lines.push(MyLineDef {
+                line: MyLine {
+                    start_vertex: start_vertex.try_into().unwrap(),
+                    end_vertex: end_vertex.try_into().unwrap(),
+                },
+                front_sidedef: if front_sidedef == -1 { None } else { Some(front_sidedef.try_into().unwrap()) },
+                back_sidedef: if back_sidedef == -1 { None } else { Some(back_sidedef.try_into().unwrap()) },
+            });
+        }
+    }
+
+    {
+        let data = wad.read_dir(index + 3).unwrap();
+
+        let len = data.len() / 26;
+        println!("Num sectors: {}", len);
+
+        for index in 0..len {
+            let start = index * 26;
+            let data = &data[start..start + 26];
+
+            let floor_height = i16::from_le_bytes(data[0..2].try_into().unwrap());
+            let ceiling_height = i16::from_le_bytes(data[2..4].try_into().unwrap());
+
+            app.sectors.push(MySector {
+                floor_height: floor_height.try_into().unwrap(),
+                ceiling_height: ceiling_height.try_into().unwrap(),
+                lines: Vec::new(),
+            });
+        }
+    }
+
+    {
+        let data = wad.read_dir(index + 3).unwrap();
+
+        let len = data.len() / 30;
+        println!("Num sidedefs: {}", len);
+
+        for index in 0..len {
+            let start = index * 30;
+            let data = &data[start..start + 30];
+
+            let sector = i16::from_le_bytes(data[28..30].try_into().unwrap());
+            app.sidedefs.push(MySidedef {
+                sector: sector.try_into().unwrap(),
             });
         }
     }
@@ -219,6 +310,18 @@ fn test_wad_data(app: &mut App) {
         }
     }
 
+    for line in &app.lines {
+        if let Some(front_sidedef) = line.front_sidedef {
+            let sidedef = app.sidedefs[front_sidedef];
+            app.sectors[sidedef.sector].lines.push(line.line);
+        }
+
+        if let Some(back_sidedef) = line.back_sidedef {
+            let sidedef = app.sidedefs[back_sidedef];
+            app.sectors[sidedef.sector].lines.push(line.line);
+        }
+    }
+
     /*
     let data_offset: usize = data_offset.try_into().unwrap();
     for i in 0..num_dirs {
@@ -233,6 +336,127 @@ fn test_wad_data(app: &mut App) {
                  lump_offset, lump_size);
     }
     */
+}
+
+fn index_vec<T>(v: &Vec<T>, i: isize) -> T
+    where T: Copy
+{
+    let len: isize = v.len().try_into().unwrap();
+
+    return if i >= len as isize{
+        v[(i % len) as usize]
+    } else if i < 0 {
+        v[(i % len + len) as usize]
+    } else {
+        v[i as usize]
+    };
+}
+
+fn cross(a: MyVertex, b: MyVertex) -> f32 {
+    return a.x * b.y - a.y * b.x;
+}
+
+fn magnitude(a: MyVertex) -> f32 {
+    return (a.x * a.x + a.y * a.y).sqrt()
+}
+
+fn point_in_triangle(p: MyVertex, a: MyVertex, b: MyVertex, c: MyVertex) -> bool {
+    let ab = b - a;
+    let bc = c - b;
+    let ca = a - c;
+
+    let ap = p - a;
+    let bp = p - b;
+    let cp = p - c;
+
+    let c1 = cross(ab, ap);
+    let c2 = cross(bc, bp);
+    let c3 = cross(ca, cp);
+
+    if c1 > 0.0 || c2 > 0.0 || c3 > 0.0 {
+        return false;
+    }
+
+    true
+}
+
+fn triangulate(vertices: &Vec<MyVertex>) -> Option<Vec<usize>> {
+    if vertices.len() < 3 {
+        return None;
+    }
+
+    let mut index_list = Vec::new();
+    for i in 0..vertices.len() {
+        index_list.push(i);
+    }
+
+    let num_triangles = vertices.len() - 2;
+    let num_indices = num_triangles * 3;
+
+    let mut result = Vec::with_capacity(num_indices);
+
+    while index_list.len() > 3 {
+        break;
+        println!("Index List Length: {}", index_list.len());
+        if index_list.len() == 24 {
+            break;
+        }
+
+        for i in 0..(index_list.len() as isize) {
+            let a = index_vec(&index_list, i.wrapping_add(1));
+            let b = index_vec(&index_list, i.wrapping_add(0));
+            let c = index_vec(&index_list, i.wrapping_add(2));
+
+            let va = vertices[a];
+            let vb = vertices[b];
+            let vc = vertices[c];
+
+            /*
+            println!("VA: {:?}", va);
+            println!("VB: {:?}", vb);
+            println!("VC: {:?}", vc);
+            */
+            // panic!();
+
+            let va_to_vb = vb - va;
+            let va_to_vc = vc - va;
+
+            if cross(va_to_vb, va_to_vc) < 0.0 {
+                continue;
+            }
+
+            let mut is_ear = true;
+
+            for vi in 0..vertices.len() {
+                if vi == a || vi == b || vi == c {
+                    continue;
+                }
+
+                let p = vertices[vi];
+                if point_in_triangle(p, vb, vc, va) {
+                    is_ear = false;
+                    break;
+                }
+            }
+
+            if is_ear {
+                result.push(b);
+                result.push(a);
+                result.push(c);
+
+                index_list.remove(i.try_into().unwrap());
+                break;
+            }
+        }
+    }
+
+    // Add the final triangle
+
+    result.push(index_list[2]);
+    result.push(index_list[0]);
+    result.push(index_list[1]);
+
+    Some(result)
 }
 
 impl App {
@@ -275,18 +499,117 @@ impl App {
 
             // polygon([1.0, 0.0, 1.0, 1.0], &verts, view, gl);
 
+            /*
             for l in &self.lines {
-                // draw_line(*l, 2.0);
+                if l.front_sidedef.is_some() {
+                    draw_line((*l).line, 2.0, [1.0, 0.3, 0.3, 1.0]);
+                } if l.back_sidedef.is_some() {
+                    draw_line((*l).line, 1.0, [0.3, 0.3, 1.0, 1.0]);
+                }
+            }
+            */
+
+            let mut index = 0;
+            let sector = &self.sectors[38];
+
+            let mut vertices = Vec::new();
+            for l in &sector.lines {
+                let start = self.vertices[l.start_vertex];
+                let end = self.vertices[l.end_vertex];
+
+                vertices.push(start);
+                vertices.push(end);
             }
 
+            let mut index_list = Vec::new();
+            let mut index = 0;
+
+            for i in 0..(vertices.len() as isize) {
+                let a = index_vec(&vertices, i);
+                let b = index_vec(&vertices, i.wrapping_sub(1));
+                let c = index_vec(&vertices, i.wrapping_add(1));
+
+                let a_to_b = b - a;
+                let a_to_c = c - a;
+
+                let cross = cross(a_to_b, a_to_c);
+                println!("Cross: {:?}", cross);
+
+                if cross > 0.0 {
+                    // Don't remove the item
+                    index_list.push(false);
+                } else if cross < 0.0 {
+                    // Don't remove the item
+                    index_list.push(false);
+                } else {
+                    // Remove the item
+                    index_list.push(true);
+                }
+            }
+
+            /*
+            let mut vertices = Vec::new();
+            vertices.push(MyVertex { x: -4.0, y: 6.0 });
+            vertices.push(MyVertex { x: 0.0, y: 2.0 });
+            vertices.push(MyVertex { x: 2.0, y: 5.0 });
+            vertices.push(MyVertex { x: 7.0, y: 0.0 });
+            vertices.push(MyVertex { x: 5.0, y: -6.0 });
+            vertices.push(MyVertex { x: 3.0, y: 3.0 });
+            vertices.push(MyVertex { x: 0.0, y: -5.0 });
+            vertices.push(MyVertex { x: -6.0, y: 0.0 });
+            vertices.push(MyVertex { x: -2.0, y: 1.0 });
+            */
+
+            for i in (0..vertices.len()) {
+                let v = vertices[i];
+
+                if index_list[i] {
+                    draw_vertex(v, [1.0, 0.0, 0.0, 1.0]);
+                } else {
+                    draw_vertex(v, [0.0, 1.0, 0.0, 1.0]);
+                }
+            }
+
+            let triangles = triangulate(&vertices)
+                .expect("Failed to triangulate");
+
+            let num_triangles = triangles.len() / 3;
+            println!("Num Triangles: {}", num_triangles);
+
+            let color = &COLOR_TABLE[index];
+            // polygon(COLOR_TABLE[index], &vertices, view, gl);
+            for l in &sector.lines {
+                let color = [color[0] - 0.05, color[1] - 0.05, color[2] - 0.05, 1.0];
+                draw_line(*l, 1.0, color);
+            }
+
+            for ti in 0..num_triangles {
+                let pa = vertices[triangles[ti * 3 + 0]];
+                let pb = vertices[triangles[ti * 3 + 1]];
+                let pc = vertices[triangles[ti * 3 + 2]];
+
+                polygon(COLOR_TABLE[index], &[[pa.x as f64, pa.y as f64], [pb.x as f64, pb.y as f64], [pc.x as f64, pc.y as f64]], view, gl);
+                // line_from_to([0.0, 0.0, 1.0, 1.0], 1.0, [pa.x as f64, pa.y as f64], [pb.x as f64, pb.y as f64], view, gl);
+                // line_from_to([0.0, 0.0, 1.0, 1.0], 1.0, [pb.x as f64, pb.y as f64], [pc.x as f64, pc.y as f64], view, gl);
+                // line_from_to([0.0, 0.0, 1.0, 1.0], 1.0, [pc.x as f64, pc.y as f64], [pa.x as f64, pa.y as f64], view, gl);
+                index += 1;
+                if index >= COLOR_TABLE.len() {
+                    index = 0;
+                }
+            }
+
+
+
             for s in &self.segments {
+                /*
                 let start_vert = self.vertices[s.line.start_vertex];
                 let end_vert = self.vertices[s.line.end_vertex];
                 let line = self.lines[s.line_index];
 
                 draw_vertex(start_vert, [1.0, 0.0, 0.0, 1.0]);
                 draw_vertex(end_vert, [0.0, 1.0, 0.0, 1.0]);
-                draw_line(line, 1.0, [0.3, 0.3, 1.0, 1.0]);
+                draw_line(line.line, 1.0, [0.3, 0.3, 1.0, 1.0]);
+                */
             }
 
             // polygon([1.0, 0.0, 1.0, 1.0], &[[0.0, 0.0], [10.0, 0.0], [5.0, 10.0]], c.transform, gl);
@@ -350,6 +673,8 @@ fn main() {
 
         vertices: Vec::new(),
         lines: Vec::new(),
+        sidedefs: Vec::new(),
+        sectors: Vec::new(),
         segments: Vec::new(),
     };
 
