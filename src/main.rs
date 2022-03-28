@@ -7,6 +7,7 @@ use opengl_graphics::{GlGraphics, OpenGL};
 use piston::event_loop::{EventSettings, Events};
 use piston::input::{RenderArgs, RenderEvent, UpdateArgs, UpdateEvent, PressEvent, ReleaseEvent, Key, Button};
 use piston::window::WindowSettings;
+use delaunator::{Point, triangulate};
 
 static COLOR_TABLE: [[f32; 4]; 10] = [
     [0.6705882352941176, 0.5607843137254902, 0.5647058823529412, 1.0],
@@ -23,8 +24,8 @@ static COLOR_TABLE: [[f32; 4]; 10] = [
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 struct MyVertex {
-    x: f32,
-    y: f32,
+    x: f64,
+    y: f64,
 }
 
 impl std::ops::Sub for MyVertex {
@@ -352,113 +353,6 @@ fn index_vec<T>(v: &Vec<T>, i: isize) -> T
     };
 }
 
-fn cross(a: MyVertex, b: MyVertex) -> f32 {
-    return a.x * b.y - a.y * b.x;
-}
-
-fn magnitude(a: MyVertex) -> f32 {
-    return (a.x * a.x + a.y * a.y).sqrt()
-}
-
-fn point_in_triangle(p: MyVertex, a: MyVertex, b: MyVertex, c: MyVertex) -> bool {
-    let ab = b - a;
-    let bc = c - b;
-    let ca = a - c;
-
-    let ap = p - a;
-    let bp = p - b;
-    let cp = p - c;
-
-    let c1 = cross(ab, ap);
-    let c2 = cross(bc, bp);
-    let c3 = cross(ca, cp);
-
-    if c1 > 0.0 || c2 > 0.0 || c3 > 0.0 {
-        return false;
-    }
-
-    true
-}
-
-fn triangulate(vertices: &Vec<MyVertex>) -> Option<Vec<usize>> {
-    if vertices.len() < 3 {
-        return None;
-    }
-
-    let mut index_list = Vec::new();
-    for i in 0..vertices.len() {
-        index_list.push(i);
-    }
-
-    let num_triangles = vertices.len() - 2;
-    let num_indices = num_triangles * 3;
-
-    let mut result = Vec::with_capacity(num_indices);
-
-    while index_list.len() > 3 {
-        break;
-        println!("Index List Length: {}", index_list.len());
-        if index_list.len() == 24 {
-            break;
-        }
-
-        for i in 0..(index_list.len() as isize) {
-            let a = index_vec(&index_list, i.wrapping_add(1));
-            let b = index_vec(&index_list, i.wrapping_add(0));
-            let c = index_vec(&index_list, i.wrapping_add(2));
-
-            let va = vertices[a];
-            let vb = vertices[b];
-            let vc = vertices[c];
-
-            /*
-            println!("VA: {:?}", va);
-            println!("VB: {:?}", vb);
-            println!("VC: {:?}", vc);
-            */
-            // panic!();
-
-            let va_to_vb = vb - va;
-            let va_to_vc = vc - va;
-
-            if cross(va_to_vb, va_to_vc) < 0.0 {
-                continue;
-            }
-
-            let mut is_ear = true;
-
-            for vi in 0..vertices.len() {
-                if vi == a || vi == b || vi == c {
-                    continue;
-                }
-
-                let p = vertices[vi];
-                if point_in_triangle(p, vb, vc, va) {
-                    is_ear = false;
-                    break;
-                }
-            }
-
-            if is_ear {
-                result.push(b);
-                result.push(a);
-                result.push(c);
-
-                index_list.remove(i.try_into().unwrap());
-                break;
-            }
-        }
-    }
-
-    // Add the final triangle
-
-    result.push(index_list[2]);
-    result.push(index_list[0]);
-    result.push(index_list[1]);
-
-    Some(result)
-}
-
 impl App {
     fn render(&mut self, args: &RenderArgs) {
         use graphics::*;
@@ -490,7 +384,7 @@ impl App {
                 let y: f64 = v.y.into();
                 let transform = identity().trans(x - 5.0, y - 5.0);
 
-                ellipse(c, square, view.append_transform(transform), gl);
+                ellipse(c, square, view.append_transform(transform), unsafe { *ptr });
             };
 
             for vert in &self.vertices {
@@ -521,31 +415,7 @@ impl App {
                 vertices.push(end);
             }
 
-            let mut index_list = Vec::new();
             let mut index = 0;
-
-            for i in 0..(vertices.len() as isize) {
-                let a = index_vec(&vertices, i);
-                let b = index_vec(&vertices, i.wrapping_sub(1));
-                let c = index_vec(&vertices, i.wrapping_add(1));
-
-                let a_to_b = b - a;
-                let a_to_c = c - a;
-
-                let cross = cross(a_to_b, a_to_c);
-                println!("Cross: {:?}", cross);
-
-                if cross > 0.0 {
-                    // Don't remove the item
-                    index_list.push(false);
-                } else if cross < 0.0 {
-                    // Don't remove the item
-                    index_list.push(false);
-                } else {
-                    // Remove the item
-                    index_list.push(true);
-                }
-            }
 
             /*
             let mut vertices = Vec::new();
@@ -560,38 +430,39 @@ impl App {
             vertices.push(MyVertex { x: -2.0, y: 1.0 });
             */
 
+
+            let mut p = Vec::new();
+            for v in &vertices {
+                p.push([v.x, v.y]);
+            }
+            polygon(COLOR_TABLE[index], &p, view, gl);
+
             for i in (0..vertices.len()) {
                 let v = vertices[i];
 
-                if index_list[i] {
-                    draw_vertex(v, [1.0, 0.0, 0.0, 1.0]);
-                } else {
-                    draw_vertex(v, [0.0, 1.0, 0.0, 1.0]);
-                }
+                draw_vertex(v, [1.0, 0.0, 0.0, 1.0]);
             }
 
-            let triangles = triangulate(&vertices)
-                .expect("Failed to triangulate");
-
-            let num_triangles = triangles.len() / 3;
-            println!("Num Triangles: {}", num_triangles);
-
-            let color = &COLOR_TABLE[index];
-            // polygon(COLOR_TABLE[index], &vertices, view, gl);
-            for l in &sector.lines {
-                let color = [color[0] - 0.05, color[1] - 0.05, color[2] - 0.05, 1.0];
-                draw_line(*l, 1.0, color);
+            let mut points = Vec::new();
+            for v in &vertices {
+                points.push(Point {
+                    x: v.x.into(),
+                    y: v.y.into(),
+                });
             }
 
-            for ti in 0..num_triangles {
-                let pa = vertices[triangles[ti * 3 + 0]];
-                let pb = vertices[triangles[ti * 3 + 1]];
-                let pc = vertices[triangles[ti * 3 + 2]];
+            let triangles = triangulate(&points);
+            // println!("Num tri: {:?}", triangles.triangles);
 
-                polygon(COLOR_TABLE[index], &[[pa.x as f64, pa.y as f64], [pb.x as f64, pb.y as f64], [pc.x as f64, pc.y as f64]], view, gl);
-                // line_from_to([0.0, 0.0, 1.0, 1.0], 1.0, [pa.x as f64, pa.y as f64], [pb.x as f64, pb.y as f64], view, gl);
-                // line_from_to([0.0, 0.0, 1.0, 1.0], 1.0, [pb.x as f64, pb.y as f64], [pc.x as f64, pc.y as f64], view, gl);
-                // line_from_to([0.0, 0.0, 1.0, 1.0], 1.0, [pc.x as f64, pc.y as f64], [pa.x as f64, pa.y as f64], view, gl);
+            for ti in 0..triangles.len() {
+                let pa = &vertices[triangles.triangles[ti + 1]];
+                let pb = &vertices[triangles.triangles[ti + 0]];
+                let pc = &vertices[triangles.triangles[ti + 2]];
+
+                // polygon(COLOR_TABLE[index], &[[pa.x, pa.y], [pb.x, pb.y], [pc.x, pc.y]], view, gl);
+                // line_from_to([0.0, 0.0, 1.0, 1.0], 1.0, [pa.x, pa.y], [pb.x, pb.y], view, gl);
+                // line_from_to([0.0, 0.0, 1.0, 1.0], 1.0, [pb.x, pb.y], [pc.x, pc.y], view, gl);
+                // line_from_to([0.0, 0.0, 1.0, 1.0], 1.0, [pc.x, pc.y], [pa.x, pa.y], view, gl);
                 index += 1;
                 if index >= COLOR_TABLE.len() {
                     index = 0;
@@ -599,6 +470,12 @@ impl App {
             }
 
 
+            let color = &COLOR_TABLE[index];
+            // polygon(COLOR_TABLE[index], &vertices, view, gl);
+            for l in &sector.lines {
+                let color = [color[0] - 0.05, color[1] - 0.05, color[2] - 0.05, 1.0];
+                draw_line(*l, 1.0, color);
+            }
 
             for s in &self.segments {
                 /*
