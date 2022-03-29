@@ -7,19 +7,19 @@ use opengl_graphics::{GlGraphics, OpenGL};
 use piston::event_loop::{EventSettings, Events};
 use piston::input::{RenderArgs, RenderEvent, UpdateArgs, UpdateEvent, PressEvent, ReleaseEvent, Key, Button};
 use piston::window::WindowSettings;
-use delaunator::{Point, triangulate};
+use delaunator::{Point};
 
 static COLOR_TABLE: [[f32; 4]; 10] = [
-    [0.6705882352941176, 0.5607843137254902, 0.5647058823529412, 1.0],
-    [0.7137254901960784, 0.5333333333333333, 0.2235294117647059, 1.0],
-    [0.6705882352941176, 0.7137254901960784, 0.6862745098039216, 1.0],
-    [0.9058823529411765, 0.5568627450980392, 0.7254901960784313, 1.0],
-    [0.4823529411764706, 0.30196078431372547, 0.396078431372549, 1.0],
-    [0.403921568627451, 0.8862745098039215, 0.027450980392156862, 1.0],
-    [0.6745098039215687, 0.32941176470588235, 0.0784313725490196, 1.0],
-    [0.9411764705882353, 0.6823529411764706, 0.8431372549019608, 1.0],
-    [0.7176470588235294, 0.32941176470588235, 0.1568627450980392, 1.0],
-    [0.6274509803921569, 0.3137254901960784, 0.011764705882352941, 1.0],
+    [0.6705882352941176, 0.56078431372549020, 0.564705882352941200, 1.0],
+    [0.7137254901960784, 0.53333333333333330, 0.223529411764705900, 1.0],
+    [0.6705882352941176, 0.71372549019607840, 0.686274509803921600, 1.0],
+    [0.9058823529411765, 0.55686274509803920, 0.725490196078431300, 1.0],
+    [0.4823529411764706, 0.30196078431372547, 0.396078431372549000, 1.0],
+    [0.4039215686274510, 0.88627450980392150, 0.027450980392156862, 1.0],
+    [0.6745098039215687, 0.32941176470588235, 0.078431372549019600, 1.0],
+    [0.9411764705882353, 0.68235294117647060, 0.843137254901960800, 1.0],
+    [0.7176470588235294, 0.32941176470588235, 0.156862745098039200, 1.0],
+    [0.6274509803921569, 0.31372549019607840, 0.011764705882352941, 1.0],
 ];
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -66,9 +66,17 @@ struct MySector {
 }
 
 #[derive(Copy, Clone, Debug)]
+struct MySubSector {
+    start_segment: usize,
+    segment_count: usize,
+}
+
+#[derive(Copy, Clone, Debug)]
 struct MySegments {
-    line: MyLine,
+    start_vertex: usize,
+    end_vertex: usize,
     line_index: usize,
+    offset: f64,
 }
 
 pub struct App {
@@ -84,10 +92,12 @@ pub struct App {
     zoom_in: bool,
     zoom_out: bool,
 
+    sub_sector_index: usize,
     vertices: Vec<MyVertex>,
     lines: Vec<MyLineDef>,
     sidedefs: Vec<MySidedef>,
     sectors: Vec<MySector>,
+    sub_sectors: Vec<MySubSector>,
     segments: Vec<MySegments>
 }
 
@@ -287,6 +297,25 @@ fn test_wad_data(app: &mut App) {
     }
 
     {
+        let data = wad.read_dir(index + 6).unwrap();
+
+        let len = data.len() / 4;
+        println!("Num sub-sectors: {}", len);
+
+        for index in 0..len {
+            let start = index * 4;
+            let data = &data[start..start + 4];
+
+            let segment_count = i16::from_le_bytes(data[0..2].try_into().unwrap());
+            let start_segment = i16::from_le_bytes(data[2..4].try_into().unwrap());
+            app.sub_sectors.push(MySubSector {
+                start_segment: start_segment.try_into().unwrap(),
+                segment_count: segment_count.try_into().unwrap(),
+            });
+        }
+    }
+
+    {
         let segments = wad.read_dir(index + 5).unwrap();
 
         let num_segments = segments.len() / 12;
@@ -300,13 +329,13 @@ fn test_wad_data(app: &mut App) {
             let end_vertex = i16::from_le_bytes(data[2..4].try_into().unwrap());
 
             let line_index = i16::from_le_bytes(data[6..8].try_into().unwrap());
+            let offset = i16::from_le_bytes(data[10..12].try_into().unwrap());
 
             app.segments.push(MySegments {
-                line: MyLine {
-                    start_vertex: start_vertex.try_into().unwrap(),
-                    end_vertex: end_vertex.try_into().unwrap(),
-                },
+                start_vertex: start_vertex.try_into().unwrap(),
+                end_vertex: end_vertex.try_into().unwrap(),
                 line_index: line_index.try_into().unwrap(),
+                offset: offset.try_into().unwrap(),
             });
         }
     }
@@ -353,6 +382,136 @@ fn index_vec<T>(v: &Vec<T>, i: isize) -> T
     };
 }
 
+fn cross(a: MyVertex, b: MyVertex) -> f64 {
+    return a.x * b.y - a.y * b.x;
+}
+
+fn magnitude(a: MyVertex) -> f64 {
+    return (a.x * a.x + a.y * a.y).sqrt()
+}
+
+fn point_in_triangle(p: MyVertex, a: MyVertex, b: MyVertex, c: MyVertex) -> bool {
+    let ab = b - a;
+    let bc = c - b;
+    let ca = a - c;
+
+    let ap = p - a;
+    let bp = p - b;
+    let cp = p - c;
+
+    let c1 = cross(ab, ap);
+    let c2 = cross(bc, bp);
+    let c3 = cross(ca, cp);
+
+    if c1 > 0.0 || c2 > 0.0 || c3 > 0.0 {
+        return false;
+    }
+
+    true
+}
+
+fn triangulate(vertices: &Vec<MyVertex>) -> Option<Vec<usize>> {
+    if vertices.len() < 3 {
+        return None;
+    }
+
+    let mut index_list = Vec::new();
+    for i in 0..vertices.len() {
+        index_list.push(i);
+    }
+
+    let num_triangles = vertices.len() - 2;
+    let num_indices = num_triangles * 3;
+
+    let mut result = Vec::with_capacity(num_indices);
+
+    let mut safe = 5000;
+    while index_list.len() > 3 && safe >= 0 {
+        println!("Index List Length: {}", index_list.len());
+        for i in 0..(index_list.len() as isize) {
+            let a = index_vec(&index_list, i.wrapping_add(0));
+            let b = index_vec(&index_list, i.wrapping_add(1));
+            let c = index_vec(&index_list, i.wrapping_add(2));
+
+            let va = vertices[a];
+            let vb = vertices[b];
+            let vc = vertices[c];
+
+            /*
+            println!("VA: {:?}", va);
+            println!("VB: {:?}", vb);
+            println!("VC: {:?}", vc);
+            */
+            // panic!();
+
+            let va_to_vb = vb - va;
+            let va_to_vc = vc - va;
+
+            if cross(va_to_vb, va_to_vc) < 0.0 {
+                continue;
+            }
+
+            let mut is_ear = true;
+
+            for vi in 0..vertices.len() {
+                if vi == a || vi == b || vi == c {
+                    continue;
+                }
+
+                let p = vertices[vi];
+                if point_in_triangle(p, vb, vc, va) {
+                    is_ear = false;
+                    break;
+                }
+            }
+
+            if is_ear {
+                result.push(b);
+                result.push(a);
+                result.push(c);
+
+                index_list.remove(i.try_into().unwrap());
+                break;
+            }
+        }
+
+        safe -= 1;
+    }
+
+    // Add the final triangle
+
+    result.push(index_list[0]);
+    result.push(index_list[1]);
+    result.push(index_list[2]);
+
+    Some(result)
+}
+
+fn line_angle(a: MyVertex, b: MyVertex) -> f64 {
+    (b.y - a.y).atan2(b.x - a.x)
+}
+
+fn point_on_line(a: MyVertex, b: MyVertex, c: MyVertex) -> bool {
+    return (line_angle(a, b) - line_angle(b, c)).abs() < 0.05
+}
+
+fn cleanup_lines(verts: &mut Vec<MyVertex>) {
+    println!("Before: {}", verts.len());
+
+    for mut i in 0..(verts.len() as isize) {
+        let p1 = index_vec(verts, i);
+        let p2 = index_vec(verts, i.wrapping_add(1));
+        let p3 = index_vec(verts, i.wrapping_add(2));
+
+        if point_on_line(p1, p2, p3) {
+            verts.remove((i.wrapping_add(1) as usize) % verts.len());
+            i -= 1;
+        }
+    }
+
+    println!("After: {}", verts.len());
+}
+
 impl App {
     fn render(&mut self, args: &RenderArgs) {
         use graphics::*;
@@ -379,6 +538,10 @@ impl App {
                 line_from_to(c, s, [start.x as f64, start.y as f64], [end.x as f64, end.y as f64], view, unsafe { *ptr });
             };
 
+            let mut draw_line_p = |x1, y1, x2, y2, s, c| {
+                line_from_to(c, s, [x1, y1], [x2, y2], view, unsafe { *ptr });
+            };
+
             let mut draw_vertex = |v: MyVertex, c| {
                 let x: f64 = v.x.into();
                 let y: f64 = v.y.into();
@@ -387,109 +550,61 @@ impl App {
                 ellipse(c, square, view.append_transform(transform), unsafe { *ptr });
             };
 
-            for vert in &self.vertices {
-                // draw_vertex(*vert, RED);
-            }
+            let mut index = 0;
 
-            // polygon([1.0, 0.0, 1.0, 1.0], &verts, view, gl);
+            let mut verts = Vec::new();
+            for sector in &self.sectors {
+            //let sector = &self.sectors[38]; {
+                for line in &sector.lines {
+                    draw_line(*line, 1.0, COLOR_TABLE[index]);
 
-            /*
-            for l in &self.lines {
-                if l.front_sidedef.is_some() {
-                    draw_line((*l).line, 2.0, [1.0, 0.3, 0.3, 1.0]);
-                } if l.back_sidedef.is_some() {
-                    draw_line((*l).line, 1.0, [0.3, 0.3, 1.0, 1.0]);
+                    let start = self.vertices[line.start_vertex];
+                    let end = self.vertices[line.end_vertex];
+
+                    verts.push(start);
+                    verts.push(end);
+
+                    // draw_vertex(start, [1.0, 0.0, 0.0, 1.0]);
+                    // draw_vertex(end, [1.0, 0.0, 0.0, 1.0]);
                 }
-            }
-            */
 
-            let mut index = 0;
-            let sector = &self.sectors[38];
-
-            let mut vertices = Vec::new();
-            for l in &sector.lines {
-                let start = self.vertices[l.start_vertex];
-                let end = self.vertices[l.end_vertex];
-
-                vertices.push(start);
-                vertices.push(end);
-            }
-
-            let mut index = 0;
-
-            /*
-            let mut vertices = Vec::new();
-            vertices.push(MyVertex { x: -4.0, y: 6.0 });
-            vertices.push(MyVertex { x: 0.0, y: 2.0 });
-            vertices.push(MyVertex { x: 2.0, y: 5.0 });
-            vertices.push(MyVertex { x: 7.0, y: 0.0 });
-            vertices.push(MyVertex { x: 5.0, y: -6.0 });
-            vertices.push(MyVertex { x: 3.0, y: 3.0 });
-            vertices.push(MyVertex { x: 0.0, y: -5.0 });
-            vertices.push(MyVertex { x: -6.0, y: 0.0 });
-            vertices.push(MyVertex { x: -2.0, y: 1.0 });
-            */
-
-
-            let mut p = Vec::new();
-            for v in &vertices {
-                p.push([v.x, v.y]);
-            }
-            polygon(COLOR_TABLE[index], &p, view, gl);
-
-            for i in (0..vertices.len()) {
-                let v = vertices[i];
-
-                draw_vertex(v, [1.0, 0.0, 0.0, 1.0]);
-            }
-
-            let mut points = Vec::new();
-            for v in &vertices {
-                points.push(Point {
-                    x: v.x.into(),
-                    y: v.y.into(),
-                });
-            }
-
-            let triangles = triangulate(&points);
-            // println!("Num tri: {:?}", triangles.triangles);
-
-            for ti in 0..triangles.len() {
-                let pa = &vertices[triangles.triangles[ti + 1]];
-                let pb = &vertices[triangles.triangles[ti + 0]];
-                let pc = &vertices[triangles.triangles[ti + 2]];
-
-                // polygon(COLOR_TABLE[index], &[[pa.x, pa.y], [pb.x, pb.y], [pc.x, pc.y]], view, gl);
-                // line_from_to([0.0, 0.0, 1.0, 1.0], 1.0, [pa.x, pa.y], [pb.x, pb.y], view, gl);
-                // line_from_to([0.0, 0.0, 1.0, 1.0], 1.0, [pb.x, pb.y], [pc.x, pc.y], view, gl);
-                // line_from_to([0.0, 0.0, 1.0, 1.0], 1.0, [pc.x, pc.y], [pa.x, pa.y], view, gl);
                 index += 1;
                 if index >= COLOR_TABLE.len() {
                     index = 0;
                 }
             }
 
+            verts.dedup();
 
-            let color = &COLOR_TABLE[index];
-            // polygon(COLOR_TABLE[index], &vertices, view, gl);
-            for l in &sector.lines {
-                let color = [color[0] - 0.05, color[1] - 0.05, color[2] - 0.05, 1.0];
-                draw_line(*l, 1.0, color);
+            for v in &verts {
+                draw_vertex(*v, [1.0, 0.0, 1.0, 1.0]);
             }
 
-            for s in &self.segments {
-                /*
-                let start_vert = self.vertices[s.line.start_vertex];
-                let end_vert = self.vertices[s.line.end_vertex];
-                let line = self.lines[s.line_index];
+            cleanup_lines(&mut verts);
 
-                draw_vertex(start_vert, [1.0, 0.0, 0.0, 1.0]);
-                draw_vertex(end_vert, [0.0, 1.0, 0.0, 1.0]);
-                draw_line(line.line, 1.0, [0.3, 0.3, 1.0, 1.0]);
-                */
+            for v in &verts {
+                draw_vertex(*v, [0.0, 1.0, 0.0, 1.0]);
             }
 
-            // polygon([1.0, 0.0, 1.0, 1.0], &[[0.0, 0.0], [10.0, 0.0], [5.0, 10.0]], c.transform, gl);
+            let mut points = Vec::new();
+            for v in &verts {
+                points.push(v.x);
+                points.push(v.y);
+            }
+
+            let triangles = earcutr::earcut(&points, &vec![], 2);
+            // let triangles = triangulate(&verts).unwrap();
+            // println!("Triangles: {:?}", triangles);
+
+            for ti in 0..(triangles.len() / 3) {
+                let a = index_vec(&verts, triangles[ti + 0].try_into().unwrap());
+                let b = index_vec(&verts, triangles[ti + 1].try_into().unwrap());
+                let c = index_vec(&verts, triangles[ti + 2].try_into().unwrap());
+
+                draw_line_p(a.x, a.y, b.x, b.y, 1.0, [0.0, 0.0, 1.0, 1.0]);
+                draw_line_p(b.x, b.y, c.x, c.y, 1.0, [0.0, 0.0, 1.0, 1.0]);
+                draw_line_p(c.x, c.y, a.x, a.y, 1.0, [0.0, 0.0, 1.0, 1.0]);
+            }
         });
     }
 
@@ -548,10 +663,12 @@ fn main() {
         zoom_in: false,
         zoom_out: false,
 
+        sub_sector_index: 0,
         vertices: Vec::new(),
         lines: Vec::new(),
         sidedefs: Vec::new(),
         sectors: Vec::new(),
+        sub_sectors: Vec::new(),
         segments: Vec::new(),
     };
 
@@ -570,6 +687,8 @@ fn main() {
                     Key::S => app.down = true,
                     Key::E => app.zoom_in = true,
                     Key::Q => app.zoom_out = true,
+                    Key::R => { app.sub_sector_index += 1; println!("Index: {}", app.sub_sector_index);},
+                    Key::T => app.sub_sector_index -= 1,
                     _ => {}
                 }
             }
