@@ -330,8 +330,10 @@ fn test_wad_data(app: &mut App) {
         let gl_magic = &data[0..4];
         println!("GL_VERT Magic: {:?}", std::str::from_utf8(&gl_magic));
 
+        let data = &data[4..];
+
         // -4 because there is a 4 byte magic
-        let len = data.len() / 8 - 4;
+        let len = data.len() / 8;
         println!("Num GL_VERT: {}", len);
 
         for index in 0..len {
@@ -341,8 +343,6 @@ fn test_wad_data(app: &mut App) {
             let x = i32::from_le_bytes(data[0..4].try_into().unwrap());
             let y = i32::from_le_bytes(data[4..8].try_into().unwrap());
 
-            // let x = (((x >> 16) & 0xffff) as f64) + (((x >> 0) & 0xffff) as f64 / 65536.0);
-            // let y = (((y >> 16) & 0xffff) as f64) + (((y >> 0) & 0xffff) as f64 / 65536.0);
             let x = x as f64 / 65536.0;
             let y = y as f64 / 65536.0;
 
@@ -734,16 +734,25 @@ impl App {
 
             const VERT_IS_GL: usize = (1 << 15);
 
-            for sub_sector in &self.gl_sub_sectors {
+            for v in &self.vertices {
+                // draw_vertex(*v, [0.0, 1.0, 0.0, 1.0]);
+            }
+
+            for v in &self.gl_vertices {
+                // draw_vertex(*v, [1.0, 0.0, 0.0, 1.0]);
+            }
+
+            /*
+            for sub_sector in &self.sub_sectors {
                 for seg_index in 0..sub_sector.segment_count {
-                    let segment = self.gl_segments[seg_index];
+                    let segment = self.segments[sub_sector.start_segment + seg_index];
 
                     let vs_index = segment.start_vertex;
                     let ve_index = segment.end_vertex;
 
                     if segment.line_index != 0xffff {
                         let line = self.lines[segment.line_index];
-                        draw_line(line.line, 1.0, [1.0, 0.0, 1.0, 1.0]);
+                        // draw_line(line.line, 0.5, [1.0, 0.0, 1.0, 1.0]);
                     }
 
                     let vs = if vs_index & VERT_IS_GL == VERT_IS_GL {
@@ -760,6 +769,37 @@ impl App {
 
                     draw_vertex(vs, [1.0, 0.0, 1.0, 1.0]);
                     draw_vertex(ve, [1.0, 0.0, 1.0, 1.0]);
+                    // draw_line_p(vs.x, vs.y, ve.x, ve.y, 1.0, [0.0, 1.0, 0.0, 1.0]);
+                }
+            }
+            */
+
+            for sub_sector in &self.gl_sub_sectors {
+                for seg_index in 0..sub_sector.segment_count {
+                    let segment = self.gl_segments[sub_sector.start_segment + seg_index];
+
+                    let vs_index = segment.start_vertex;
+                    let ve_index = segment.end_vertex;
+
+                    if segment.line_index != 0xffff {
+                        let line = self.lines[segment.line_index];
+                        // draw_line(line.line, 0.5, [1.0, 0.0, 1.0, 1.0]);
+                    }
+
+                    let vs = if vs_index & VERT_IS_GL == VERT_IS_GL {
+                        self.gl_vertices[vs_index & !VERT_IS_GL]
+                    } else {
+                        self.vertices[vs_index]
+                    };
+
+                    let ve = if ve_index & VERT_IS_GL == VERT_IS_GL {
+                        self.gl_vertices[ve_index & !VERT_IS_GL]
+                    } else {
+                        self.vertices[ve_index]
+                    };
+
+                    draw_vertex(vs, [0.0, 0.0, 1.0, 1.0]);
+                    draw_vertex(ve, [0.0, 0.0, 1.0, 1.0]);
                     draw_line_p(vs.x, vs.y, ve.x, ve.y, 1.0, [0.0, 1.0, 0.0, 1.0]);
                 }
             }
@@ -811,8 +851,8 @@ fn main() {
     // Create a new game and run it.
     let mut app = App {
         gl: GlGraphics::new(opengl),
-        camera_x: 0.0, // -1056.0,
-        camera_y: 0.0, // 3616.0,
+        camera_x: -1056.0,
+        camera_y: 3616.0,
         zoom: 1.0,
 
         left: false,
