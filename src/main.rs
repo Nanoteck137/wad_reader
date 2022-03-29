@@ -1,13 +1,16 @@
+use std::collections::HashSet;
 use std::path::Path;
 use std::fs::File;
 use std::io::Read;
+
 
 use glutin_window::GlutinWindow as Window;
 use opengl_graphics::{GlGraphics, OpenGL};
 use piston::event_loop::{EventSettings, Events};
 use piston::input::{RenderArgs, RenderEvent, UpdateArgs, UpdateEvent, PressEvent, ReleaseEvent, Key, Button};
 use piston::window::WindowSettings;
-use delaunator::{Point};
+use rgeometry::data::{ Polygon, Point };
+// use delaunator::{Point};
 
 static COLOR_TABLE: [[f32; 4]; 10] = [
     [0.6705882352941176, 0.56078431372549020, 0.564705882352941200, 1.0],
@@ -40,7 +43,7 @@ impl std::ops::Sub for MyVertex {
 
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 struct MyLine {
     start_vertex: usize,
     end_vertex: usize,
@@ -98,7 +101,12 @@ pub struct App {
     sidedefs: Vec<MySidedef>,
     sectors: Vec<MySector>,
     sub_sectors: Vec<MySubSector>,
-    segments: Vec<MySegments>
+    segments: Vec<MySegments>,
+
+    // GL
+    gl_vertices: Vec<MyVertex>,
+    gl_segments: Vec<MySegments>,
+    gl_sub_sectors: Vec<MySubSector>,
 }
 
 fn read_file<P>(path: P) -> Vec<u8>
@@ -315,6 +323,84 @@ fn test_wad_data(app: &mut App) {
         }
     }
 
+    // Parse the GL_VERT
+    {
+        let data = wad.read_dir(index + 12).unwrap();
+
+        let gl_magic = &data[0..4];
+        println!("GL_VERT Magic: {:?}", std::str::from_utf8(&gl_magic));
+
+        // -4 because there is a 4 byte magic
+        let len = data.len() / 8 - 4;
+        println!("Num GL_VERT: {}", len);
+
+        for index in 0..len {
+            let start = index * 8;
+            let data = &data[start..start + 8];
+
+            let x = i32::from_le_bytes(data[0..4].try_into().unwrap());
+            let y = i32::from_le_bytes(data[4..8].try_into().unwrap());
+
+            // let x = (((x >> 16) & 0xffff) as f64) + (((x >> 0) & 0xffff) as f64 / 65536.0);
+            // let y = (((y >> 16) & 0xffff) as f64) + (((y >> 0) & 0xffff) as f64 / 65536.0);
+            let x = x as f64 / 65536.0;
+            let y = y as f64 / 65536.0;
+
+            app.gl_vertices.push(MyVertex {
+                x: x,
+                y: y,
+            });
+        }
+    }
+
+    // Parse the GL_SSECT
+    {
+        let data = wad.read_dir(index + 14).unwrap();
+        // TODO(patrik): Look for magic
+
+        let len = data.len() / 4;
+        println!("Num GL_SSECT: {}", len);
+
+        for index in 0..len {
+            let start = index * 4;
+            let data = &data[start..start + 4];
+
+            let segment_count = u16::from_le_bytes(data[0..2].try_into().unwrap());
+            let start_segment = u16::from_le_bytes(data[2..4].try_into().unwrap());
+
+            app.gl_sub_sectors.push(MySubSector {
+                start_segment: start_segment.try_into().unwrap(),
+                segment_count: segment_count.try_into().unwrap(),
+            });
+        }
+    }
+
+    // Parse the GL_SEGS
+    {
+        let data = wad.read_dir(index + 13).unwrap();
+        // TODO(patrik): Look for magic
+
+        let len = data.len() / 10;
+        println!("Num GL_SEGS: {}", len);
+
+        for index in 0..len {
+            let start = index * 10;
+            let data = &data[start..start + 10];
+
+            let start_vertex = u16::from_le_bytes(data[0..2].try_into().unwrap());
+            let end_vertex = u16::from_le_bytes(data[2..4].try_into().unwrap());
+
+            let line_index = u16::from_le_bytes(data[4..6].try_into().unwrap());
+
+            app.gl_segments.push(MySegments {
+                start_vertex: start_vertex.try_into().unwrap(),
+                end_vertex: end_vertex.try_into().unwrap(),
+                line_index: line_index.try_into().unwrap(),
+                offset: 0.0,
+            });
+        }
+    }
+
     {
         let segments = wad.read_dir(index + 5).unwrap();
 
@@ -351,6 +437,102 @@ fn test_wad_data(app: &mut App) {
             app.sectors[sidedef.sector].lines.push(line.line);
         }
     }
+
+    /*
+    let sector = &mut app.sectors[38];
+
+    let mut lines = Vec::new();
+    lines.push(sector.lines[0]);
+
+    for current_line_index in 0..sector.lines.len() {
+        let current_line = sector.lines[current_line_index];
+
+        let eb = lines[lines.len() - 1].end_vertex;
+        let mut found = false;
+
+        for m in &sector.lines {
+            let ma = m.start_vertex;
+            let mb = m.end_vertex;
+
+            if eb == ma {
+                let mut flip_found = false;
+
+                for n in &lines {
+                    if n.start_vertex == mb && n.end_vertex == ma {
+                        flip_found = true;
+                        break;
+                    }
+                }
+
+                if flip_found {
+                    continue;
+                } else {
+                    lines.push(*m);
+                    found = true;
+                    break;
+                }
+            }
+        }
+
+        if !found {
+            for m in &sector.lines {
+                let ma = m.start_vertex;
+                let mb = m.end_vertex;
+
+                let is_not_in_lines = |e: MyLine| {
+                    for l in &lines {
+                        if *l == e {
+                            return false;
+                        }
+                    }
+
+                    true
+                };
+
+                if mb == eb && is_not_in_lines(*m) {
+                    lines.push(MyLine {
+                        start_vertex: mb,
+                        end_vertex: ma
+                    });
+                }
+            }
+        }
+    }
+
+    lines.remove(lines.len() - 1);
+    sector.lines = lines;
+
+    let mut verts = Vec::new();
+    let sector = &app.sectors[38]; {
+        for line_index in 0..sector.lines.len() {
+            let line = &sector.lines[line_index];
+            let per = line_index as f32/ sector.lines.len() as f32;
+
+            let start = app.vertices[line.start_vertex];
+            let end = app.vertices[line.end_vertex];
+
+            verts.push(start);
+            verts.push(end);
+        }
+    }
+
+    cleanup_lines(&mut verts);
+
+    let mut new_verts = HashSet::new();
+    for v in &verts {
+        new_verts.insert([v.x as i64, v.y as i64]);
+    }
+
+    let mut points = Vec::new();
+    for v in &new_verts {
+        points.push(Point::new(*v));
+    }
+    */
+
+    // let mut polygon = rgeometry::algorithms::polygonization::two_opt_moves(points, &mut rand::thread_rng()).unwrap();
+    // let mut polygon = Polygon::new(points).unwrap();
+    // rgeometry::algorithms::resolve_self_intersections(&mut polygon, &mut rand::thread_rng()).unwrap();
+    // let hull = rgeometry::algorithms::convex_hull::graham_scan::convex_hull(points).unwrap();
 
     /*
     let data_offset: usize = data_offset.try_into().unwrap();
@@ -430,8 +612,8 @@ fn triangulate(vertices: &Vec<MyVertex>) -> Option<Vec<usize>> {
         println!("Index List Length: {}", index_list.len());
         for i in 0..(index_list.len() as isize) {
             let a = index_vec(&index_list, i.wrapping_add(0));
-            let b = index_vec(&index_list, i.wrapping_add(1));
-            let c = index_vec(&index_list, i.wrapping_add(2));
+            let b = index_vec(&index_list, i.wrapping_sub(1));
+            let c = index_vec(&index_list, i.wrapping_add(1));
 
             let va = vertices[a];
             let vb = vertices[b];
@@ -447,7 +629,7 @@ fn triangulate(vertices: &Vec<MyVertex>) -> Option<Vec<usize>> {
             let va_to_vb = vb - va;
             let va_to_vc = vc - va;
 
-            if cross(va_to_vb, va_to_vc) < 0.0 {
+            if cross(va_to_vb, va_to_vc) < 0.00 {
                 continue;
             }
 
@@ -459,7 +641,7 @@ fn triangulate(vertices: &Vec<MyVertex>) -> Option<Vec<usize>> {
                 }
 
                 let p = vertices[vi];
-                if point_in_triangle(p, vb, vc, va) {
+                if point_in_triangle(p, vb, va, vc) {
                     is_ear = false;
                     break;
                 }
@@ -550,61 +732,38 @@ impl App {
                 ellipse(c, square, view.append_transform(transform), unsafe { *ptr });
             };
 
-            let mut index = 0;
+            const VERT_IS_GL: usize = (1 << 15);
 
-            let mut verts = Vec::new();
-            for sector in &self.sectors {
-            //let sector = &self.sectors[38]; {
-                for line in &sector.lines {
-                    draw_line(*line, 1.0, COLOR_TABLE[index]);
+            for sub_sector in &self.gl_sub_sectors {
+                for seg_index in 0..sub_sector.segment_count {
+                    let segment = self.gl_segments[seg_index];
 
-                    let start = self.vertices[line.start_vertex];
-                    let end = self.vertices[line.end_vertex];
+                    let vs_index = segment.start_vertex;
+                    let ve_index = segment.end_vertex;
 
-                    verts.push(start);
-                    verts.push(end);
+                    if segment.line_index != 0xffff {
+                        let line = self.lines[segment.line_index];
+                        draw_line(line.line, 1.0, [1.0, 0.0, 1.0, 1.0]);
+                    }
 
-                    // draw_vertex(start, [1.0, 0.0, 0.0, 1.0]);
-                    // draw_vertex(end, [1.0, 0.0, 0.0, 1.0]);
+                    let vs = if vs_index & VERT_IS_GL == VERT_IS_GL {
+                        self.gl_vertices[vs_index & !VERT_IS_GL]
+                    } else {
+                        self.vertices[vs_index]
+                    };
+
+                    let ve = if ve_index & VERT_IS_GL == VERT_IS_GL {
+                        self.gl_vertices[ve_index & !VERT_IS_GL]
+                    } else {
+                        self.vertices[ve_index]
+                    };
+
+                    draw_vertex(vs, [1.0, 0.0, 1.0, 1.0]);
+                    draw_vertex(ve, [1.0, 0.0, 1.0, 1.0]);
+                    draw_line_p(vs.x, vs.y, ve.x, ve.y, 1.0, [0.0, 1.0, 0.0, 1.0]);
                 }
-
-                index += 1;
-                if index >= COLOR_TABLE.len() {
-                    index = 0;
-                }
             }
 
-            verts.dedup();
-
-            for v in &verts {
-                draw_vertex(*v, [1.0, 0.0, 1.0, 1.0]);
-            }
-
-            cleanup_lines(&mut verts);
-
-            for v in &verts {
-                draw_vertex(*v, [0.0, 1.0, 0.0, 1.0]);
-            }
-
-            let mut points = Vec::new();
-            for v in &verts {
-                points.push(v.x);
-                points.push(v.y);
-            }
-
-            let triangles = earcutr::earcut(&points, &vec![], 2);
-            // let triangles = triangulate(&verts).unwrap();
-            // println!("Triangles: {:?}", triangles);
-
-            for ti in 0..(triangles.len() / 3) {
-                let a = index_vec(&verts, triangles[ti + 0].try_into().unwrap());
-                let b = index_vec(&verts, triangles[ti + 1].try_into().unwrap());
-                let c = index_vec(&verts, triangles[ti + 2].try_into().unwrap());
-
-                draw_line_p(a.x, a.y, b.x, b.y, 1.0, [0.0, 0.0, 1.0, 1.0]);
-                draw_line_p(b.x, b.y, c.x, c.y, 1.0, [0.0, 0.0, 1.0, 1.0]);
-                draw_line_p(c.x, c.y, a.x, a.y, 1.0, [0.0, 0.0, 1.0, 1.0]);
-            }
         });
     }
 
@@ -652,8 +811,8 @@ fn main() {
     // Create a new game and run it.
     let mut app = App {
         gl: GlGraphics::new(opengl),
-        camera_x: -1056.0,
-        camera_y: 3616.0,
+        camera_x: 0.0, // -1056.0,
+        camera_y: 0.0, // 3616.0,
         zoom: 1.0,
 
         left: false,
@@ -670,6 +829,10 @@ fn main() {
         sectors: Vec::new(),
         sub_sectors: Vec::new(),
         segments: Vec::new(),
+
+        gl_vertices: Vec::new(),
+        gl_segments: Vec::new(),
+        gl_sub_sectors: Vec::new(),
     };
 
     // app.vertices.push(Vertex { x: 0.0, y: 0.0 });
