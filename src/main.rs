@@ -65,13 +65,13 @@ struct MySidedef {
 struct MySector {
     floor_height: usize,
     ceiling_height: usize,
-    lines: Vec<MyLine>,
+    sub_sectors: Vec<MySubSector>,
 }
 
 #[derive(Copy, Clone, Debug)]
 struct MySubSector {
-    start_segment: usize,
-    segment_count: usize,
+    start: usize,
+    count: usize,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -282,7 +282,7 @@ fn test_wad_data(app: &mut App) {
             app.sectors.push(MySector {
                 floor_height: floor_height.try_into().unwrap(),
                 ceiling_height: ceiling_height.try_into().unwrap(),
-                lines: Vec::new(),
+                sub_sectors: Vec::new(),
             });
         }
     }
@@ -314,11 +314,12 @@ fn test_wad_data(app: &mut App) {
             let start = index * 4;
             let data = &data[start..start + 4];
 
-            let segment_count = i16::from_le_bytes(data[0..2].try_into().unwrap());
-            let start_segment = i16::from_le_bytes(data[2..4].try_into().unwrap());
+            let count = i16::from_le_bytes(data[0..2].try_into().unwrap());
+            let segment = i16::from_le_bytes(data[2..4].try_into().unwrap());
+
             app.sub_sectors.push(MySubSector {
-                start_segment: start_segment.try_into().unwrap(),
-                segment_count: segment_count.try_into().unwrap(),
+                start: start.try_into().unwrap(),
+                count: count.try_into().unwrap(),
             });
         }
     }
@@ -365,12 +366,12 @@ fn test_wad_data(app: &mut App) {
             let start = index * 4;
             let data = &data[start..start + 4];
 
-            let segment_count = u16::from_le_bytes(data[0..2].try_into().unwrap());
-            let start_segment = u16::from_le_bytes(data[2..4].try_into().unwrap());
+            let count = u16::from_le_bytes(data[0..2].try_into().unwrap());
+            let start = u16::from_le_bytes(data[2..4].try_into().unwrap());
 
             app.gl_sub_sectors.push(MySubSector {
-                start_segment: start_segment.try_into().unwrap(),
-                segment_count: segment_count.try_into().unwrap(),
+                start: start.try_into().unwrap(),
+                count: count.try_into().unwrap(),
             });
         }
     }
@@ -441,30 +442,27 @@ fn test_wad_data(app: &mut App) {
     */
 
     for sub_sector in &app.gl_sub_sectors {
-        for seg_index in 0..sub_sector.segment_count {
-            let segment = app.gl_segments[sub_sector.start_segment + seg_index];
+        let mut last_sector = None;
+        for seg_index in 0..sub_sector.count {
+            let segment = app.gl_segments[sub_sector.start + seg_index];
 
             if segment.line_index != 0xffff {
                 let line = app.lines[segment.line_index];
 
                 if let Some(front_sidedef) = line.front_sidedef {
                     let sidedef = app.sidedefs[front_sidedef];
-                    // app.sectors[sidedef.sector].lines.push(line.line);
-                    app.sectors[sidedef.sector].lines.push(MyLine {
-                        start_vertex: segment.start_vertex,
-                        end_vertex: segment.end_vertex,
-                    });
+                    last_sector = Some(sidedef.sector);
                 }
 
                 if let Some(back_sidedef) = line.back_sidedef {
                     let sidedef = app.sidedefs[back_sidedef];
-                    // app.sectors[sidedef.sector].lines.push(line.line);
-                    app.sectors[sidedef.sector].lines.push(MyLine {
-                        start_vertex: segment.start_vertex,
-                        end_vertex: segment.end_vertex,
-                    });
+                    last_sector = Some(sidedef.sector);
                 }
             }
+        }
+
+        if let Some(sector) = last_sector {
+            app.sectors[sector].sub_sectors.push(*sub_sector);
         }
     }
 
@@ -774,20 +772,55 @@ impl App {
                 ellipse(c, square, view.append_transform(transform), unsafe { *ptr });
             };
 
+            let mut index = 0;
+            //let sector = &self.sectors[self.sub_sector_index + 28]; {
+            for sector in &self.sectors {
+                for sub_sectors in &sector.sub_sectors {
+                    let mut verts = Vec::new();
+                    for segment_index in 0..sub_sectors.count {
+                        let segment = self.gl_segments[sub_sectors.start + segment_index];
 
-            for v in &self.vertices {
-                // draw_vertex(*v, [0.0, 1.0, 0.0, 1.0]);
-            }
+                        let vs_index = segment.start_vertex;
+                        let ve_index = segment.end_vertex;
 
-            for v in &self.gl_vertices {
-                // draw_vertex(*v, [1.0, 0.0, 0.0, 1.0]);
-            }
+                        if segment.line_index != 0xffff {
+                            let line = self.lines[segment.line_index];
+                            // draw_line(line.line, 0.5, [1.0, 0.0, 1.0, 1.0]);
+                        }
 
-            let sector = &self.sectors[38];
-            for line_index in 0..sector.lines.len() {
-                let line = sector.lines[line_index];
-                let per = line_index as f32 / sector.lines.len() as f32;
-                draw_line(line, 1.0, [per, 0.3, 0.3, 1.0]);
+                        let vs = if vs_index & VERT_IS_GL == VERT_IS_GL {
+                            self.gl_vertices[vs_index & !VERT_IS_GL]
+                        } else {
+                            self.vertices[vs_index]
+                        };
+
+                        let ve = if ve_index & VERT_IS_GL == VERT_IS_GL {
+                            self.gl_vertices[ve_index & !VERT_IS_GL]
+                        } else {
+                            self.vertices[ve_index]
+                        };
+
+                        verts.push(vs);
+                        verts.push(ve);
+
+                        // draw_line_p(vs.x, vs.y, ve.x, ve.y, 1.0, [0.0, 1.0, 0.0, 1.0]);
+                    }
+
+                    let mut points = Vec::new();
+                    for v in &verts {
+                        points.push([v.x, v.y]);
+                    }
+
+                    polygon(COLOR_TABLE[index], &points, view, gl);
+
+                    for v in &verts {
+                        draw_vertex(*v, [1.0, 0.0, 1.0, 1.0]);
+                    }
+                }
+                index += 1;
+                if index >= COLOR_TABLE.len() {
+                    index = 0;
+                }
             }
 
             /*
