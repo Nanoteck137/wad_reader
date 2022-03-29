@@ -426,6 +426,7 @@ fn test_wad_data(app: &mut App) {
         }
     }
 
+    /*
     for line in &app.lines {
         if let Some(front_sidedef) = line.front_sidedef {
             let sidedef = app.sidedefs[front_sidedef];
@@ -435,6 +436,35 @@ fn test_wad_data(app: &mut App) {
         if let Some(back_sidedef) = line.back_sidedef {
             let sidedef = app.sidedefs[back_sidedef];
             app.sectors[sidedef.sector].lines.push(line.line);
+        }
+    }
+    */
+
+    for sub_sector in &app.gl_sub_sectors {
+        for seg_index in 0..sub_sector.segment_count {
+            let segment = app.gl_segments[sub_sector.start_segment + seg_index];
+
+            if segment.line_index != 0xffff {
+                let line = app.lines[segment.line_index];
+
+                if let Some(front_sidedef) = line.front_sidedef {
+                    let sidedef = app.sidedefs[front_sidedef];
+                    // app.sectors[sidedef.sector].lines.push(line.line);
+                    app.sectors[sidedef.sector].lines.push(MyLine {
+                        start_vertex: segment.start_vertex,
+                        end_vertex: segment.end_vertex,
+                    });
+                }
+
+                if let Some(back_sidedef) = line.back_sidedef {
+                    let sidedef = app.sidedefs[back_sidedef];
+                    // app.sectors[sidedef.sector].lines.push(line.line);
+                    app.sectors[sidedef.sector].lines.push(MyLine {
+                        start_vertex: segment.start_vertex,
+                        end_vertex: segment.end_vertex,
+                    });
+                }
+            }
         }
     }
 
@@ -714,9 +744,21 @@ impl App {
 
             let view = c.view.trans(-self.camera_x, self.camera_y).zoom(self.zoom);
 
+            const VERT_IS_GL: usize = (1 << 15);
+
             let mut draw_line = |l: MyLine, s, c| {
-                let start = self.vertices[l.start_vertex];
-                let end = self.vertices[l.end_vertex];
+                let start = if l.start_vertex & VERT_IS_GL == VERT_IS_GL {
+                    self.gl_vertices[l.start_vertex & !VERT_IS_GL]
+                } else {
+                    self.vertices[l.start_vertex]
+                };
+
+                let end = if l.end_vertex & VERT_IS_GL == VERT_IS_GL {
+                    self.gl_vertices[l.end_vertex & !VERT_IS_GL]
+                } else {
+                    self.vertices[l.end_vertex]
+                };
+
                 line_from_to(c, s, [start.x as f64, start.y as f64], [end.x as f64, end.y as f64], view, unsafe { *ptr });
             };
 
@@ -732,7 +774,6 @@ impl App {
                 ellipse(c, square, view.append_transform(transform), unsafe { *ptr });
             };
 
-            const VERT_IS_GL: usize = (1 << 15);
 
             for v in &self.vertices {
                 // draw_vertex(*v, [0.0, 1.0, 0.0, 1.0]);
@@ -740,6 +781,13 @@ impl App {
 
             for v in &self.gl_vertices {
                 // draw_vertex(*v, [1.0, 0.0, 0.0, 1.0]);
+            }
+
+            let sector = &self.sectors[38];
+            for line_index in 0..sector.lines.len() {
+                let line = sector.lines[line_index];
+                let per = line_index as f32 / sector.lines.len() as f32;
+                draw_line(line, 1.0, [per, 0.3, 0.3, 1.0]);
             }
 
             /*
@@ -774,6 +822,7 @@ impl App {
             }
             */
 
+            /*
             for sub_sector in &self.gl_sub_sectors {
                 for seg_index in 0..sub_sector.segment_count {
                     let segment = self.gl_segments[sub_sector.start_segment + seg_index];
@@ -803,6 +852,7 @@ impl App {
                     draw_line_p(vs.x, vs.y, ve.x, ve.y, 1.0, [0.0, 1.0, 0.0, 1.0]);
                 }
             }
+            */
 
         });
     }
