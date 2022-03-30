@@ -12,6 +12,8 @@ use piston::window::WindowSettings;
 use rgeometry::data::{ Polygon, Point };
 // use delaunator::{Point};
 
+const VERT_IS_GL: usize = (1 << 15);
+
 static COLOR_TABLE: [[f32; 4]; 10] = [
     [0.6705882352941176, 0.56078431372549020, 0.564705882352941200, 1.0],
     [0.7137254901960784, 0.53333333333333330, 0.223529411764705900, 1.0],
@@ -65,7 +67,10 @@ struct MySidedef {
 struct MySector {
     floor_height: usize,
     ceiling_height: usize,
-    sub_sectors: Vec<MySubSector>,
+    lines: Vec<MyLineDef>,
+
+    box_start: MyVertex,
+    box_end: MyVertex,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -75,22 +80,22 @@ struct MySubSector {
 }
 
 #[derive(Copy, Clone, Debug)]
-struct MySegments {
+struct MySegment {
     start_vertex: usize,
     end_vertex: usize,
 
     linedef: usize,
-    sidedef: usize,
-    front_sector: usize,
-    back_sector: usize,
+    side: usize,
+    partner_segment: usize,
 }
 
 #[derive(Copy, Clone, Debug)]
 struct MyBox {
-    top: f64,
-    bottom: f64,
-    left: f64,
-    right: f64
+    min_x: f64,
+    min_y: f64,
+
+    max_x: f64,
+    max_y: f64,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -126,13 +131,15 @@ pub struct App {
     sidedefs: Vec<MySidedef>,
     sectors: Vec<MySector>,
     sub_sectors: Vec<MySubSector>,
-    segments: Vec<MySegments>,
+    segments: Vec<MySegment>,
 
     // GL
     gl_vertices: Vec<MyVertex>,
-    gl_segments: Vec<MySegments>,
+    gl_segments: Vec<MySegment>,
     gl_sub_sectors: Vec<MySubSector>,
     gl_nodes: Vec<MyNode>,
+
+    test_segments: Vec<MySegment>,
 }
 
 fn read_file<P>(path: P) -> Vec<u8>
@@ -308,7 +315,10 @@ fn test_wad_data(app: &mut App) {
             app.sectors.push(MySector {
                 floor_height: floor_height.try_into().unwrap(),
                 ceiling_height: ceiling_height.try_into().unwrap(),
-                sub_sectors: Vec::new(),
+                lines: Vec::new(),
+
+                box_start: MyVertex { x: 0.0, y: 0.0 },
+                box_end: MyVertex { x: 0.0, y: 0.0 },
             });
         }
     }
@@ -367,14 +377,13 @@ fn test_wad_data(app: &mut App) {
             let line_index = i16::from_le_bytes(data[6..8].try_into().unwrap());
             let offset = i16::from_le_bytes(data[10..12].try_into().unwrap());
 
-            app.segments.push(MySegments {
+            app.segments.push(MySegment {
                 start_vertex: start_vertex.try_into().unwrap(),
                 end_vertex: end_vertex.try_into().unwrap(),
 
-                linedef: 0,
-                sidedef: 0,
-                front_sector: 0,
-                back_sector: 0,
+                linedef: line_index.try_into().unwrap(),
+                side: 0,
+                partner_segment: 0,
             });
         }
     }
@@ -446,37 +455,20 @@ fn test_wad_data(app: &mut App) {
             let start_vertex = u16::from_le_bytes(data[0..2].try_into().unwrap());
             let end_vertex = u16::from_le_bytes(data[2..4].try_into().unwrap());
 
-            let line = u16::from_le_bytes(data[4..6].try_into().unwrap());
-            let line: usize = line.try_into().unwrap();
-
+            let linedef = u16::from_le_bytes(data[4..6].try_into().unwrap());
             let side = u16::from_le_bytes(data[6..8].try_into().unwrap());
+            let partner_segment = u16::from_le_bytes(data[8..10].try_into().unwrap());
 
-            let line_def = app.lines[line];
-            let side = if side == 0 {
-                // Front side
-                line_def.front_sidedef.unwrap()
-            } else if side == 1 {
-                // Back side
-                line_def.back_sidedef.unwrap()
-            } else {
-                panic!("Unknown side");
-            };
-
-            let sidedef = app.sidedefs[side];
-
-            app.gl_segments.push(MySegments {
+            app.gl_segments.push(MySegment {
                 start_vertex: start_vertex.try_into().unwrap(),
                 end_vertex: end_vertex.try_into().unwrap(),
 
-                linedef: line,
-                sidedef: side,
-                front_sector: 0,
-                back_sector: 0,
+                linedef: linedef.try_into().unwrap(),
+                side: side.try_into().unwrap(),
+                partner_segment: partner_segment.try_into().unwrap(),
             });
         }
     }
-
-    panic!();
 
     // Parse the GL_NODES
     {
@@ -495,34 +487,25 @@ fn test_wad_data(app: &mut App) {
             let dx = i16::from_le_bytes(data[4..6].try_into().unwrap());
             let dy = i16::from_le_bytes(data[6..8].try_into().unwrap());
 
-            let right_box_top = i16::from_le_bytes(data[8..10].try_into().unwrap());
-            let right_box_bottom = i16::from_le_bytes(data[10..12].try_into().unwrap());
-            let right_box_left = i16::from_le_bytes(data[12..14].try_into().unwrap());
-            let right_box_right = i16::from_le_bytes(data[14..16].try_into().unwrap());
+            let parse_box = |b: &[u8]| {
+                let max_y = i16::from_le_bytes(b[0..2].try_into().unwrap());
+                let min_y = i16::from_le_bytes(b[2..4].try_into().unwrap());
+                let min_x = i16::from_le_bytes(b[4..6].try_into().unwrap());
+                let max_x = i16::from_le_bytes(b[6..8].try_into().unwrap());
 
-            let left_box_top = i16::from_le_bytes(data[16..18].try_into().unwrap());
-            let left_box_bottom = i16::from_le_bytes(data[18..20].try_into().unwrap());
-            let left_box_left = i16::from_le_bytes(data[20..22].try_into().unwrap());
-            let left_box_right = i16::from_le_bytes(data[22..24].try_into().unwrap());
-
-            let right_box = MyBox {
-                top: right_box_top.try_into().unwrap(),
-                bottom: right_box_bottom.try_into().unwrap(),
-                left: right_box_left.try_into().unwrap(),
-                right: right_box_right.try_into().unwrap(),
+                MyBox {
+                    min_x: min_x.try_into().unwrap(),
+                    min_y: min_y.try_into().unwrap(),
+                    max_x: max_x.try_into().unwrap(),
+                    max_y: max_y.try_into().unwrap(),
+                }
             };
 
-            let left_box = MyBox {
-                top: left_box_top.try_into().unwrap(),
-                bottom: left_box_bottom.try_into().unwrap(),
-                left: left_box_left.try_into().unwrap(),
-                right: left_box_right.try_into().unwrap(),
-            };
+            let right_box = parse_box(&data[8..16]);
+            let left_box = parse_box(&data[16..24]);
 
             let right_child = u16::from_le_bytes(data[24..26].try_into().unwrap());
             let left_child = u16::from_le_bytes(data[26..28].try_into().unwrap());
-
-            println!("X: {} Y: {} DX: {:4} DY: {:4}", x, y, dx, dy);
 
             app.gl_nodes.push(MyNode {
                 x: x.try_into().unwrap(),
@@ -539,155 +522,103 @@ fn test_wad_data(app: &mut App) {
         }
     }
 
-    /*
-    for line in &app.lines {
-        if let Some(front_sidedef) = line.front_sidedef {
-            let sidedef = app.sidedefs[front_sidedef];
-            app.sectors[sidedef.sector].lines.push(line.line);
-        }
-
-        if let Some(back_sidedef) = line.back_sidedef {
-            let sidedef = app.sidedefs[back_sidedef];
-            app.sectors[sidedef.sector].lines.push(line.line);
-        }
-    }
-    */
-
     for sub_sector in &app.gl_sub_sectors {
-        let mut last_sector = None;
-        for seg_index in 0..sub_sector.count {
-            let segment = app.gl_segments[sub_sector.start + seg_index];
+        let mut normal_segments = Vec::new();
+        let mut mini_segments = Vec::new();
+
+        for i in 0..sub_sector.count {
+            let segment = app.gl_segments[sub_sector.start + i];
 
             if segment.linedef != 0xffff {
-                let line = app.lines[segment.linedef];
-
-                if let Some(front_sidedef) = line.front_sidedef {
-                    let sidedef = app.sidedefs[front_sidedef];
-                    last_sector = Some(sidedef.sector);
-                }
-
-                if let Some(back_sidedef) = line.back_sidedef {
-                    let sidedef = app.sidedefs[back_sidedef];
-                    last_sector = Some(sidedef.sector);
-                }
+                normal_segments.push((i, segment));
+            } else {
+                mini_segments.push((i, segment));
             }
         }
 
-        if let Some(sector) = last_sector {
-            app.sectors[sector].sub_sectors.push(*sub_sector);
-        }
-    }
+        for (_segment_index, segment) in &normal_segments {
+            let linedef = app.lines[segment.linedef];
+            let sidedef = if segment.side == 0 {
+                linedef.front_sidedef.unwrap()
+            } else if segment.side == 1 {
+                linedef.back_sidedef.unwrap()
+            } else {
+                panic!("wot");
+            };
 
-    /*
-    let sector = &mut app.sectors[38];
-
-    let mut lines = Vec::new();
-    lines.push(sector.lines[0]);
-
-    for current_line_index in 0..sector.lines.len() {
-        let current_line = sector.lines[current_line_index];
-
-        let eb = lines[lines.len() - 1].end_vertex;
-        let mut found = false;
-
-        for m in &sector.lines {
-            let ma = m.start_vertex;
-            let mb = m.end_vertex;
-
-            if eb == ma {
-                let mut flip_found = false;
-
-                for n in &lines {
-                    if n.start_vertex == mb && n.end_vertex == ma {
-                        flip_found = true;
-                        break;
-                    }
-                }
-
-                if flip_found {
-                    continue;
-                } else {
-                    lines.push(*m);
-                    found = true;
-                    break;
-                }
-            }
+            let sidedef = app.sidedefs[sidedef];
+            app.sectors[sidedef.sector].lines.push(linedef);
         }
 
-        if !found {
-            for m in &sector.lines {
-                let ma = m.start_vertex;
-                let mb = m.end_vertex;
+        // TODO(patrik): Look at the normal segments inside here
+        // And find their sector to live in
+        // Then look at the mini segments and add them also to the same sector
 
-                let is_not_in_lines = |e: MyLine| {
-                    for l in &lines {
-                        if *l == e {
-                            return false;
-                        }
-                    }
+        // TODO(patrik): We need to find if minisegs are inside sectors
+        // We could test and see if ray-casting polygon
+        // https://wrf.ecse.rpi.edu/Research/Short_Notes/pnpoly.html
+        // https://stackoverflow.com/questions/217578/how-can-i-determine-whether-a-2d-point-is-within-a-polygon
 
-                    true
-                };
+        // println!("Normal Segments: {}", normal_segments.len());
+        // println!("Mini Segments: {}", mini_segments.len());
+    }
 
-                if mb == eb && is_not_in_lines(*m) {
-                    lines.push(MyLine {
-                        start_vertex: mb,
-                        end_vertex: ma
-                    });
-                }
-            }
+    let min_val = |a: f64, b: f64| {
+        if a < b { a } else { b }
+    };
+
+    let max_val = |a: f64, b: f64| {
+        if a > b { a } else { b }
+    };
+
+    let min_vert = |a: MyVertex, b: MyVertex| {
+        MyVertex {
+            x: min_val(a.x, b.x),
+            y: min_val(a.y, b.y),
         }
-    }
+    };
 
-    lines.remove(lines.len() - 1);
-    sector.lines = lines;
-
-    let mut verts = Vec::new();
-    let sector = &app.sectors[38]; {
-        for line_index in 0..sector.lines.len() {
-            let line = &sector.lines[line_index];
-            let per = line_index as f32/ sector.lines.len() as f32;
-
-            let start = app.vertices[line.start_vertex];
-            let end = app.vertices[line.end_vertex];
-
-            verts.push(start);
-            verts.push(end);
+    let max_vert = |a: MyVertex, b: MyVertex| {
+        MyVertex {
+            x: max_val(a.x, b.x),
+            y: max_val(a.y, b.y),
         }
+    };
+
+    let bounding_box = |sector: &MySector| {
+        let mut min = MyVertex { x: f64::MAX, y: f64::MAX };
+        let mut max = MyVertex { x: f64::MIN, y: f64::MIN };
+
+        for line in &sector.lines {
+            let line = line.line;
+            let start = if line.start_vertex & VERT_IS_GL == VERT_IS_GL {
+                app.gl_vertices[line.start_vertex & !VERT_IS_GL]
+            } else {
+                app.vertices[line.start_vertex]
+            };
+
+            let end = if line.end_vertex & VERT_IS_GL == VERT_IS_GL {
+                app.gl_vertices[line.end_vertex & !VERT_IS_GL]
+            } else {
+                app.vertices[line.end_vertex]
+            };
+
+            min = min_vert(start, min);
+            min = min_vert(end, min);
+
+            max = max_vert(start, max);
+            max = max_vert(end, max);
+        }
+
+        (min, max)
+    };
+
+    for sector in app.sectors.iter_mut() {
+        let (min, max) = bounding_box(sector);
+
+        (*sector).box_start = min;
+        (*sector).box_end = max;
     }
-
-    cleanup_lines(&mut verts);
-
-    let mut new_verts = HashSet::new();
-    for v in &verts {
-        new_verts.insert([v.x as i64, v.y as i64]);
-    }
-
-    let mut points = Vec::new();
-    for v in &new_verts {
-        points.push(Point::new(*v));
-    }
-    */
-
-    // let mut polygon = rgeometry::algorithms::polygonization::two_opt_moves(points, &mut rand::thread_rng()).unwrap();
-    // let mut polygon = Polygon::new(points).unwrap();
-    // rgeometry::algorithms::resolve_self_intersections(&mut polygon, &mut rand::thread_rng()).unwrap();
-    // let hull = rgeometry::algorithms::convex_hull::graham_scan::convex_hull(points).unwrap();
-
-    /*
-    let data_offset: usize = data_offset.try_into().unwrap();
-    for i in 0..num_dirs {
-        let start = data_offset + i * 16;
-        let bytes = &data[start..start+16];
-
-        let lump_offset = i32::from_le_bytes(bytes[0..4].try_into().unwrap());
-        let lump_size = i32::from_le_bytes(bytes[4..8].try_into().unwrap());
-        let lump_name = &bytes[8..16];
-        println!("Name: {:?} {:#x} {}",
-                 std::str::from_utf8(&lump_name),
-                 lump_offset, lump_size);
-    }
-    */
 }
 
 fn index_vec<T>(v: &Vec<T>, i: isize) -> T
@@ -854,8 +785,6 @@ impl App {
 
             let view = c.view.trans(-self.camera_x, self.camera_y).zoom(self.zoom);
 
-            const VERT_IS_GL: usize = (1 << 15);
-
             let mut draw_line = |l: MyLine, s, c| {
                 let start = if l.start_vertex & VERT_IS_GL == VERT_IS_GL {
                     self.gl_vertices[l.start_vertex & !VERT_IS_GL]
@@ -884,6 +813,91 @@ impl App {
                 ellipse(c, square, view.append_transform(transform), unsafe { *ptr });
             };
 
+            let mut draw_box = |b: MyBox, c| {
+                let min_x = b.min_x;
+                let min_y = b.min_y;
+                let max_x = b.max_x;
+                let max_y = b.max_y;
+
+                draw_vertex(MyVertex { x: min_x, y: min_y }, c);
+                draw_vertex(MyVertex { x: max_x, y: min_y }, c);
+                draw_vertex(MyVertex { x: max_x, y: max_y }, c);
+                draw_vertex(MyVertex { x: min_x, y: max_y }, c);
+
+                draw_line_p(min_x, min_y, max_x, min_y, 1.0, c);
+                draw_line_p(max_x, min_y, max_x, max_y, 1.0, c);
+                draw_line_p(max_x, max_y, min_x, max_y, 1.0, c);
+                draw_line_p(min_x, max_y, min_x, min_y, 1.0, c);
+            };
+
+            for sector in &self.sectors {
+            //let sector = &self.sectors[38]; {
+                for line in &sector.lines {
+                    draw_line(line.line, 1.0, [1.0, 0.0, 1.0, 1.0]);
+                }
+            }
+
+            let mut index = 0;
+            for sector in &self.sectors {
+                let start = sector.box_start;
+                let end = sector.box_end;
+
+                /*
+                draw_vertex(MyVertex { x: start.x, y: start.y }, COLOR_TABLE[index]);
+                draw_vertex(MyVertex { x: end.x, y: start.y }, COLOR_TABLE[index]);
+                draw_vertex(MyVertex { x: end.x, y: end.y }, COLOR_TABLE[index]);
+                draw_vertex(MyVertex { x: start.x, y: end.y }, COLOR_TABLE[index]);
+                */
+
+                index += 1;
+                if index >= COLOR_TABLE.len() {
+                    index = 0;
+                }
+            }
+
+            let node = self.gl_nodes[self.gl_nodes.len() - 1];
+            println!("Node: {:?}", node);
+            // let node = self.gl_nodes[node.left_child];
+
+            draw_line_p(node.x - node.dx, node.y - node.dy, node.x + node.dx, node.y + node.dy, 1.0, [0.0, 0.0, 1.0, 1.0]);
+            draw_vertex(MyVertex { x: node.x, y: node.y }, [0.0, 1.0, 0.0, 1.0]);
+
+            draw_box(node.left_box, [0.0, 1.0, 0.0, 1.0]);
+            draw_box(node.right_box, [1.0, 0.0, 0.0, 1.0]);
+
+            // draw_line_p(x, y, x + w, y, 1.0, [0.0, 1.0, 1.0, 1.0]);
+            // draw_line_p(x + w, y, x + w, y + h, 1.0, [0.0, 1.0, 1.0, 1.0]);
+            // draw_line_p(x + w, y, x, y + h, 1.0, [0.0, 1.0, 1.0, 1.0]);
+            // draw_line_p(x, y, x + w, y, 1.0, [0.0, 1.0, 1.0, 1.0]);
+
+            /*
+            for segment in &self.test_segments {
+                let vs_index = segment.start_vertex;
+                let ve_index = segment.end_vertex;
+
+                if segment.linedef != 0xffff {
+                    let line = self.lines[segment.linedef];
+                    // draw_line(line.line, 0.5, [1.0, 0.0, 1.0, 1.0]);
+                }
+
+                let vs = if vs_index & VERT_IS_GL == VERT_IS_GL {
+                    self.gl_vertices[vs_index & !VERT_IS_GL]
+                } else {
+                    self.vertices[vs_index]
+                };
+
+                let ve = if ve_index & VERT_IS_GL == VERT_IS_GL {
+                    self.gl_vertices[ve_index & !VERT_IS_GL]
+                } else {
+                    self.vertices[ve_index]
+                };
+
+                draw_vertex(vs, [1.0, 0.0, 1.0, 1.0]);
+                draw_vertex(ve, [1.0, 0.0, 1.0, 1.0]);
+            }
+            */
+
+            /*
             let mut index = 0;
             //let sector = &self.sectors[self.sub_sector_index + 28]; {
             for sector in &self.sectors {
@@ -949,6 +963,7 @@ impl App {
             // draw_line_p(x + w, y, x, y + h, 1.0, [0.0, 1.0, 1.0, 1.0]);
             // draw_line_p(x, y, x + w, y, 1.0, [0.0, 1.0, 1.0, 1.0]);
 
+            */
             /*
             for sub_sector in &self.sub_sectors {
                 for seg_index in 0..sub_sector.segment_count {
@@ -1083,6 +1098,8 @@ fn main() {
         gl_segments: Vec::new(),
         gl_sub_sectors: Vec::new(),
         gl_nodes: Vec::new(),
+
+        test_segments: Vec::new(),
     };
 
     // app.vertices.push(Vertex { x: 0.0, y: 0.0 });
