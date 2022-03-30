@@ -78,8 +78,33 @@ struct MySubSector {
 struct MySegments {
     start_vertex: usize,
     end_vertex: usize,
-    line_index: usize,
-    offset: f64,
+
+    linedef: usize,
+    sidedef: usize,
+    front_sector: usize,
+    back_sector: usize,
+}
+
+#[derive(Copy, Clone, Debug)]
+struct MyBox {
+    top: f64,
+    bottom: f64,
+    left: f64,
+    right: f64
+}
+
+#[derive(Copy, Clone, Debug)]
+struct MyNode {
+    x: f64,
+    y: f64,
+    dx: f64,
+    dy: f64,
+
+    right_box: MyBox,
+    left_box: MyBox,
+
+    right_child: usize,
+    left_child: usize,
 }
 
 pub struct App {
@@ -107,6 +132,7 @@ pub struct App {
     gl_vertices: Vec<MyVertex>,
     gl_segments: Vec<MySegments>,
     gl_sub_sectors: Vec<MySubSector>,
+    gl_nodes: Vec<MyNode>,
 }
 
 fn read_file<P>(path: P) -> Vec<u8>
@@ -324,6 +350,35 @@ fn test_wad_data(app: &mut App) {
         }
     }
 
+    // Parse the segments
+    {
+        let segments = wad.read_dir(index + 5).unwrap();
+
+        let num_segments = segments.len() / 12;
+        println!("Num segments: {}", num_segments);
+
+        for index in 0..num_segments {
+            let start = index * 12;
+            let data = &segments[start..start + 12];
+
+            let start_vertex = i16::from_le_bytes(data[0..2].try_into().unwrap());
+            let end_vertex = i16::from_le_bytes(data[2..4].try_into().unwrap());
+
+            let line_index = i16::from_le_bytes(data[6..8].try_into().unwrap());
+            let offset = i16::from_le_bytes(data[10..12].try_into().unwrap());
+
+            app.segments.push(MySegments {
+                start_vertex: start_vertex.try_into().unwrap(),
+                end_vertex: end_vertex.try_into().unwrap(),
+
+                linedef: 0,
+                sidedef: 0,
+                front_sector: 0,
+                back_sector: 0,
+            });
+        }
+    }
+
     // Parse the GL_VERT
     {
         let data = wad.read_dir(index + 12).unwrap();
@@ -391,38 +446,95 @@ fn test_wad_data(app: &mut App) {
             let start_vertex = u16::from_le_bytes(data[0..2].try_into().unwrap());
             let end_vertex = u16::from_le_bytes(data[2..4].try_into().unwrap());
 
-            let line_index = u16::from_le_bytes(data[4..6].try_into().unwrap());
+            let line = u16::from_le_bytes(data[4..6].try_into().unwrap());
+            let line: usize = line.try_into().unwrap();
+
+            let side = u16::from_le_bytes(data[6..8].try_into().unwrap());
+
+            let line_def = app.lines[line];
+            let side = if side == 0 {
+                // Front side
+                line_def.front_sidedef.unwrap()
+            } else if side == 1 {
+                // Back side
+                line_def.back_sidedef.unwrap()
+            } else {
+                panic!("Unknown side");
+            };
+
+            let sidedef = app.sidedefs[side];
 
             app.gl_segments.push(MySegments {
                 start_vertex: start_vertex.try_into().unwrap(),
                 end_vertex: end_vertex.try_into().unwrap(),
-                line_index: line_index.try_into().unwrap(),
-                offset: 0.0,
+
+                linedef: line,
+                sidedef: side,
+                front_sector: 0,
+                back_sector: 0,
             });
         }
     }
 
+    panic!();
+
+    // Parse the GL_NODES
     {
-        let segments = wad.read_dir(index + 5).unwrap();
+        let data = wad.read_dir(index + 15).unwrap();
+        // TODO(patrik): Look for magic
 
-        let num_segments = segments.len() / 12;
-        println!("Num segments: {}", num_segments);
+        let len = data.len() / 28;
+        println!("Num GL_NODES: {}", len);
 
-        for index in 0..num_segments {
-            let start = index * 12;
-            let data = &segments[start..start + 12];
+        for index in 0..len {
+            let start = index * 28;
+            let data = &data[start..start + 28];
 
-            let start_vertex = i16::from_le_bytes(data[0..2].try_into().unwrap());
-            let end_vertex = i16::from_le_bytes(data[2..4].try_into().unwrap());
+            let x = i16::from_le_bytes(data[0..2].try_into().unwrap());
+            let y = i16::from_le_bytes(data[2..4].try_into().unwrap());
+            let dx = i16::from_le_bytes(data[4..6].try_into().unwrap());
+            let dy = i16::from_le_bytes(data[6..8].try_into().unwrap());
 
-            let line_index = i16::from_le_bytes(data[6..8].try_into().unwrap());
-            let offset = i16::from_le_bytes(data[10..12].try_into().unwrap());
+            let right_box_top = i16::from_le_bytes(data[8..10].try_into().unwrap());
+            let right_box_bottom = i16::from_le_bytes(data[10..12].try_into().unwrap());
+            let right_box_left = i16::from_le_bytes(data[12..14].try_into().unwrap());
+            let right_box_right = i16::from_le_bytes(data[14..16].try_into().unwrap());
 
-            app.segments.push(MySegments {
-                start_vertex: start_vertex.try_into().unwrap(),
-                end_vertex: end_vertex.try_into().unwrap(),
-                line_index: line_index.try_into().unwrap(),
-                offset: offset.try_into().unwrap(),
+            let left_box_top = i16::from_le_bytes(data[16..18].try_into().unwrap());
+            let left_box_bottom = i16::from_le_bytes(data[18..20].try_into().unwrap());
+            let left_box_left = i16::from_le_bytes(data[20..22].try_into().unwrap());
+            let left_box_right = i16::from_le_bytes(data[22..24].try_into().unwrap());
+
+            let right_box = MyBox {
+                top: right_box_top.try_into().unwrap(),
+                bottom: right_box_bottom.try_into().unwrap(),
+                left: right_box_left.try_into().unwrap(),
+                right: right_box_right.try_into().unwrap(),
+            };
+
+            let left_box = MyBox {
+                top: left_box_top.try_into().unwrap(),
+                bottom: left_box_bottom.try_into().unwrap(),
+                left: left_box_left.try_into().unwrap(),
+                right: left_box_right.try_into().unwrap(),
+            };
+
+            let right_child = u16::from_le_bytes(data[24..26].try_into().unwrap());
+            let left_child = u16::from_le_bytes(data[26..28].try_into().unwrap());
+
+            println!("X: {} Y: {} DX: {:4} DY: {:4}", x, y, dx, dy);
+
+            app.gl_nodes.push(MyNode {
+                x: x.try_into().unwrap(),
+                y: y.try_into().unwrap(),
+                dx: dx.try_into().unwrap(),
+                dy: dy.try_into().unwrap(),
+
+                right_box,
+                left_box,
+
+                right_child: right_child.try_into().unwrap(),
+                left_child: left_child.try_into().unwrap(),
             });
         }
     }
@@ -446,8 +558,8 @@ fn test_wad_data(app: &mut App) {
         for seg_index in 0..sub_sector.count {
             let segment = app.gl_segments[sub_sector.start + seg_index];
 
-            if segment.line_index != 0xffff {
-                let line = app.lines[segment.line_index];
+            if segment.linedef != 0xffff {
+                let line = app.lines[segment.linedef];
 
                 if let Some(front_sidedef) = line.front_sidedef {
                     let sidedef = app.sidedefs[front_sidedef];
@@ -783,8 +895,8 @@ impl App {
                         let vs_index = segment.start_vertex;
                         let ve_index = segment.end_vertex;
 
-                        if segment.line_index != 0xffff {
-                            let line = self.lines[segment.line_index];
+                        if segment.linedef != 0xffff {
+                            let line = self.lines[segment.linedef];
                             // draw_line(line.line, 0.5, [1.0, 0.0, 1.0, 1.0]);
                         }
 
@@ -822,6 +934,20 @@ impl App {
                     index = 0;
                 }
             }
+
+            let node = self.gl_nodes[0];
+
+            draw_line_p(node.x, node.y, node.x + node.dx, node.y + node.dx, 1.0, [0.0, 0.0, 1.0, 1.0]);
+
+            let x = node.right_box.left;
+            let y = node.right_box.top;
+            let w = node.right_box.left - node.right_box.right;
+            let h = node.right_box.top - node.right_box.right;
+
+            draw_line_p(x, y, x + w, y, 1.0, [0.0, 1.0, 1.0, 1.0]);
+            draw_line_p(x + w, y, x + w, y + h, 1.0, [0.0, 1.0, 1.0, 1.0]);
+            // draw_line_p(x + w, y, x, y + h, 1.0, [0.0, 1.0, 1.0, 1.0]);
+            // draw_line_p(x, y, x + w, y, 1.0, [0.0, 1.0, 1.0, 1.0]);
 
             /*
             for sub_sector in &self.sub_sectors {
@@ -956,6 +1082,7 @@ fn main() {
         gl_vertices: Vec::new(),
         gl_segments: Vec::new(),
         gl_sub_sectors: Vec::new(),
+        gl_nodes: Vec::new(),
     };
 
     // app.vertices.push(Vertex { x: 0.0, y: 0.0 });
