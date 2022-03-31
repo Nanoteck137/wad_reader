@@ -9,8 +9,8 @@ use opengl_graphics::{GlGraphics, OpenGL};
 use piston::event_loop::{EventSettings, Events};
 use piston::input::{RenderArgs, RenderEvent, UpdateArgs, UpdateEvent, PressEvent, ReleaseEvent, Key, Button};
 use piston::window::WindowSettings;
-use rgeometry::data::{ Polygon, Point };
-// use delaunator::{Point};
+// use rgeometry::data::{ Polygon, Point };
+use delaunator::{Point};
 
 const VERT_IS_GL: usize = (1 << 15);
 
@@ -780,81 +780,35 @@ fn point_in_triangle(p: MyVertex, a: MyVertex, b: MyVertex, c: MyVertex) -> bool
     true
 }
 
-fn triangulate(vertices: &Vec<MyVertex>) -> Option<Vec<usize>> {
-    if vertices.len() < 3 {
-        return None;
+fn triangulate(polygon: &Vec<MyVertex>) -> Option<Vec<MyVertex>> {
+    let mut vertices = Vec::new();
+
+    let mut polygon = polygon.iter();
+
+    let fp = match polygon.next() {
+        Some(val) => val,
+        None => return None,
+    };
+
+    let mut gp = match polygon.next() {
+        Some(val) => val,
+        None => return None,
+    };
+
+    loop {
+        vertices.push(*fp);
+
+        let p = match polygon.next() {
+            Some(val) => val,
+            None => break,
+        };
+
+        vertices.push(*gp);
+        vertices.push(*p);
+        gp = p;
     }
 
-    let mut index_list = Vec::new();
-    for i in 0..vertices.len() {
-        index_list.push(i);
-    }
-
-    let num_triangles = vertices.len() - 2;
-    let num_indices = num_triangles * 3;
-
-    let mut result = Vec::with_capacity(num_indices);
-
-    let mut safe = 5000;
-    while index_list.len() > 3 && safe >= 0 {
-        println!("Index List Length: {}", index_list.len());
-        for i in 0..(index_list.len() as isize) {
-            let a = index_vec(&index_list, i.wrapping_add(0));
-            let b = index_vec(&index_list, i.wrapping_sub(1));
-            let c = index_vec(&index_list, i.wrapping_add(1));
-
-            let va = vertices[a];
-            let vb = vertices[b];
-            let vc = vertices[c];
-
-            /*
-            println!("VA: {:?}", va);
-            println!("VB: {:?}", vb);
-            println!("VC: {:?}", vc);
-            */
-            // panic!();
-
-            let va_to_vb = vb - va;
-            let va_to_vc = vc - va;
-
-            if cross(va_to_vb, va_to_vc) < 0.00 {
-                continue;
-            }
-
-            let mut is_ear = true;
-
-            for vi in 0..vertices.len() {
-                if vi == a || vi == b || vi == c {
-                    continue;
-                }
-
-                let p = vertices[vi];
-                if point_in_triangle(p, vb, va, vc) {
-                    is_ear = false;
-                    break;
-                }
-            }
-
-            if is_ear {
-                result.push(b);
-                result.push(a);
-                result.push(c);
-
-                index_list.remove(i.try_into().unwrap());
-                break;
-            }
-        }
-
-        safe -= 1;
-    }
-
-    // Add the final triangle
-
-    result.push(index_list[0]);
-    result.push(index_list[1]);
-    result.push(index_list[2]);
-
-    Some(result)
+    Some(vertices)
 }
 
 fn line_angle(a: MyVertex, b: MyVertex) -> f64 {
@@ -1053,12 +1007,30 @@ impl App {
                         // draw_line_p(vs.x, vs.y, ve.x, ve.y, 1.0, [0.0, 1.0, 0.0, 1.0]);
                     }
 
+                    // verts.dedup();
+
                     let mut points = Vec::new();
                     for v in &verts {
+                        // points.push(Point { x: v.x, y: v.y });
                         points.push([v.x, v.y]);
                     }
 
-                    polygon(COLOR_TABLE[index], &points, view, gl);
+                    //let triangles = delaunator::triangulate(&points).triangles;
+                    let triangles = triangulate(&verts).unwrap();
+                    println!("Triangles: {}", triangles.len());
+
+                    // polygon(COLOR_TABLE[index], &points, view, gl);
+
+                    for i in 0..(triangles.len() / 3) {
+                        let p1 = &triangles[i + 0];
+                        let p2 = &triangles[i + 1];
+                        let p3 = &triangles[i + 2];
+
+                        draw_line_p(p1.x, p1.y, p2.x, p2.y, 1.0, [0.3, 1.0, 0.3, 1.0]);
+                        draw_line_p(p2.x, p2.y, p3.x, p3.y, 1.0, [0.3, 1.0, 0.3, 1.0]);
+                        draw_line_p(p3.x, p3.y, p1.x, p1.y, 1.0, [0.3, 1.0, 0.3, 1.0]);
+                    }
+
                     index += 1;
                     if index >= COLOR_TABLE.len() {
                         index = 0;
