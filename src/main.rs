@@ -976,18 +976,14 @@ impl App {
             let mut index = 0;
             let sector = &self.sectors[38]; {
             // for sector in &self.sectors {
-                for sub_sectors in &sector.sub_sectors {
+                // let sub_sector = &sector.sub_sectors[1]; {
+                for sub_sector in &sector.sub_sectors {
                     let mut verts = Vec::new();
-                    for segment_index in 0..sub_sectors.count {
-                        let segment = self.gl_segments[sub_sectors.start + segment_index];
+                    for segment_index in 0..sub_sector.count {
+                        let segment = self.gl_segments[sub_sector.start + segment_index];
 
                         let vs_index = segment.start_vertex;
                         let ve_index = segment.end_vertex;
-
-                        if segment.linedef != 0xffff {
-                            let line = self.lines[segment.linedef];
-                            // draw_line(line.line, 0.5, [1.0, 0.0, 1.0, 1.0]);
-                        }
 
                         let vs = if vs_index & VERT_IS_GL == VERT_IS_GL {
                             self.gl_vertices[vs_index & !VERT_IS_GL]
@@ -1004,10 +1000,10 @@ impl App {
                         verts.push(vs);
                         verts.push(ve);
 
-                        // draw_line_p(vs.x, vs.y, ve.x, ve.y, 1.0, [0.0, 1.0, 0.0, 1.0]);
+                        draw_line_p(vs.x, vs.y, ve.x, ve.y, 1.0, [0.0, 1.0, 0.0, 1.0]);
                     }
 
-                    // verts.dedup();
+                    verts.dedup();
 
                     let mut points = Vec::new();
                     for v in &verts {
@@ -1015,12 +1011,13 @@ impl App {
                         points.push([v.x, v.y]);
                     }
 
-                    //let triangles = delaunator::triangulate(&points).triangles;
+                    // let triangles = delaunator::triangulate(&points).triangles;
                     let triangles = triangulate(&verts).unwrap();
-                    println!("Triangles: {}", triangles.len());
+                    // println!("Triangles: {}", triangles.len());
 
                     // polygon(COLOR_TABLE[index], &points, view, gl);
 
+                    /*
                     for i in 0..(triangles.len() / 3) {
                         let p1 = &triangles[i + 0];
                         let p2 = &triangles[i + 1];
@@ -1030,6 +1027,7 @@ impl App {
                         draw_line_p(p2.x, p2.y, p3.x, p3.y, 1.0, [0.3, 1.0, 0.3, 1.0]);
                         draw_line_p(p3.x, p3.y, p1.x, p1.y, 1.0, [0.3, 1.0, 0.3, 1.0]);
                     }
+                    */
 
                     index += 1;
                     if index >= COLOR_TABLE.len() {
