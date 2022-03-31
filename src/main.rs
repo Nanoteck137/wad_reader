@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 use std::fs::File;
-use std::io::Read;
+use std::io::{ Read, Write };
 
 
 use glutin_window::GlutinWindow as Window;
@@ -26,6 +26,63 @@ static COLOR_TABLE: [[f32; 4]; 10] = [
     [0.7176470588235294, 0.32941176470588235, 0.156862745098039200, 1.0],
     [0.6274509803921569, 0.31372549019607840, 0.011764705882352941, 1.0],
 ];
+
+struct Map {
+    vertices: Vec<MyVertex>,
+    indices: Vec<u32>,
+}
+
+impl Map {
+    fn save_to_file<P>(&self, filename: P) -> Option<()>
+        where P: AsRef<Path>
+    {
+        let mut buffer = Vec::new();
+
+        // Write out the header
+        buffer.extend_from_slice(b"MAPU");
+        buffer.extend_from_slice(&1u32.to_le_bytes());
+
+        // We can set a initial size here
+
+        // Save the offset where we should write the vertex buffer header
+        let vertex_buffer_header = buffer.len();
+        buffer.extend_from_slice(&0u64.to_le_bytes());
+        buffer.extend_from_slice(&0u64.to_le_bytes());
+
+        // Save the offset where we should write the index buffer size
+        let index_buffer_header = buffer.len();
+        buffer.extend_from_slice(&0u64.to_le_bytes());
+        buffer.extend_from_slice(&0u64.to_le_bytes());
+
+        let vertex_buffer_offset = buffer.len();
+        for vert in &self.vertices {
+            // TODO(patrik): Should we use f64 or should we use f32
+            buffer.extend_from_slice(&vert.x.to_bits().to_le_bytes());
+            buffer.extend_from_slice(&vert.y.to_bits().to_le_bytes());
+        }
+
+        let index_buffer_offset = buffer.len();
+        for index in &self.indices {
+            buffer.extend_from_slice(&index.to_le_bytes());
+        }
+
+        // Write the vertex buffer offset
+        let vertex_buffer_offset: u64 = vertex_buffer_offset.try_into().ok()?;
+        let vertex_buffer_count: u64 = self.vertices.len().try_into().ok()?;
+        buffer[vertex_buffer_header..vertex_buffer_header + 8].clone_from_slice(&vertex_buffer_offset.to_le_bytes());
+        buffer[vertex_buffer_header + 8..vertex_buffer_header + 16].clone_from_slice(&vertex_buffer_count.to_le_bytes());
+
+        let index_buffer_offset: u64 = index_buffer_offset.try_into().ok()?;
+        let index_buffer_count: u64 = self.indices.len().try_into().ok()?;
+        buffer[index_buffer_header..index_buffer_header + 8].clone_from_slice(&index_buffer_offset.to_le_bytes());
+        buffer[index_buffer_header + 8..index_buffer_header + 16].clone_from_slice(&index_buffer_count.to_le_bytes());
+
+        let mut file = File::create(filename).ok()?;
+        file.write_all(&buffer[..]);
+
+        None
+    }
+}
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 struct MyVertex {
@@ -1154,6 +1211,30 @@ impl App {
 }
 
 fn main() {
+    // 0 *    * 3
+    // 1 *    * 2
+    let vertices = vec![
+        MyVertex { x: 0.0, y: 0.0 },
+        MyVertex { x: 0.0, y: 1.0 },
+        MyVertex { x: 1.0, y: 1.0 },
+        MyVertex { x: 1.0, y: 0.0 },
+    ];
+
+    // 0 3 2
+    // 3 1 0
+
+    let indices = vec![
+        0, 2, 1, 0, 3, 2
+    ];
+
+    let map = Map {
+        vertices,
+        indices
+    };
+
+    map.save_to_file("map.mup")
+        .expect("Failed to save map");
+
     // Change this to OpenGL::V2_1 if not working.
     let opengl = OpenGL::V3_2;
 
