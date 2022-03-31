@@ -94,8 +94,8 @@ impl Map {
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 struct MyVertex {
-    x: f64,
-    y: f64,
+    x: f32,
+    y: f32,
     color: [f32; 4],
 }
 
@@ -465,8 +465,8 @@ fn test_wad_data(app: &mut App) {
             let x = i32::from_le_bytes(data[0..4].try_into().unwrap());
             let y = i32::from_le_bytes(data[4..8].try_into().unwrap());
 
-            let x = x as f64 / 65536.0;
-            let y = y as f64 / 65536.0;
+            let x = x as f32 / 65536.0;
+            let y = y as f32 / 65536.0;
 
             app.gl_vertices.push(MyVertex {
                 x: x,
@@ -775,7 +775,7 @@ fn triangulate(polygon: &Vec<MyVertex>) -> Option<Vec<u32>> {
     Some(indices)
 }
 
-fn line_angle(a: MyVertex, b: MyVertex) -> f64 {
+fn line_angle(a: MyVertex, b: MyVertex) -> f32 {
     (b.y - a.y).atan2(b.x - a.x)
 }
 
@@ -833,7 +833,7 @@ impl App {
             };
 
             let mut draw_line_p = |x1, y1, x2, y2, s, c| {
-                line_from_to(c, s, [x1, y1], [x2, y2], view, unsafe { *ptr });
+                line_from_to(c, s, [x1 as f64, y1 as f64], [x2 as f64, y2 as f64], view, unsafe { *ptr });
             };
 
             let mut draw_vertex = |v: MyVertex, c| {
@@ -862,217 +862,6 @@ impl App {
                 draw_line_p(max_x, max_y, min_x, max_y, 1.0, c);
                 draw_line_p(min_x, max_y, min_x, min_y, 1.0, c);
             };
-
-            /*
-            for sector in &self.sectors {
-            //let sector = &self.sectors[38]; {
-                for line in &sector.lines {
-                    draw_line(line.line, 1.0, [1.0, 0.0, 1.0, 1.0]);
-                }
-            }
-
-            let mut index = 0;
-            for sector in &self.sectors {
-                let start = sector.box_start;
-                let end = sector.box_end;
-
-                /*
-                draw_vertex(MyVertex { x: start.x, y: start.y }, COLOR_TABLE[index]);
-                draw_vertex(MyVertex { x: end.x, y: start.y }, COLOR_TABLE[index]);
-                draw_vertex(MyVertex { x: end.x, y: end.y }, COLOR_TABLE[index]);
-                draw_vertex(MyVertex { x: start.x, y: end.y }, COLOR_TABLE[index]);
-                */
-
-                index += 1;
-                if index >= COLOR_TABLE.len() {
-                    index = 0;
-                }
-            }
-
-            let node = self.gl_nodes[self.gl_nodes.len() - 1];
-            // let node = self.gl_nodes[node.left_child];
-
-            draw_line_p(node.x - node.dx * 40.0, node.y - node.dy * 40.0, node.x + node.dx * 40.0, node.y + node.dy * 40.0, 1.0, [0.0, 0.0, 1.0, 1.0]);
-            draw_vertex(MyVertex { x: node.x, y: node.y }, [0.0, 1.0, 0.0, 1.0]);
-
-            draw_box(node.left_box, [0.0, 1.0, 0.0, 1.0]);
-            draw_box(node.right_box, [1.0, 0.0, 0.0, 1.0]);
-            */
-
-            // draw_line_p(x, y, x + w, y, 1.0, [0.0, 1.0, 1.0, 1.0]);
-            // draw_line_p(x + w, y, x + w, y + h, 1.0, [0.0, 1.0, 1.0, 1.0]);
-            // draw_line_p(x + w, y, x, y + h, 1.0, [0.0, 1.0, 1.0, 1.0]);
-            // draw_line_p(x, y, x + w, y, 1.0, [0.0, 1.0, 1.0, 1.0]);
-
-            /*
-            // let sector = &self.sectors[29];
-            for sector in &self.sectors {
-                for segment in &sector.segments {
-                    let vs_index = segment.start_vertex;
-                    let ve_index = segment.end_vertex;
-
-                    let vs = if vs_index & VERT_IS_GL == VERT_IS_GL {
-                        self.gl_vertices[vs_index & !VERT_IS_GL]
-                    } else {
-                        self.vertices[vs_index]
-                    };
-
-                    let ve = if ve_index & VERT_IS_GL == VERT_IS_GL {
-                        self.gl_vertices[ve_index & !VERT_IS_GL]
-                    } else {
-                        self.vertices[ve_index]
-                    };
-
-                    if segment.linedef != 0xffff {
-                        let line = self.lines[segment.linedef];
-                        draw_line(line.line, 0.5, [1.0, 0.0, 1.0, 1.0]);
-                    } else {
-                        draw_line_p(vs.x, vs.y, ve.x, ve.y, 1.0, [0.0, 0.0, 1.0, 1.0]);
-                        draw_vertex(vs, [0.0, 0.0, 1.0, 1.0]);
-                        draw_vertex(ve, [0.0, 0.0, 1.0, 1.0]);
-                    }
-                }
-            }
-            */
-
-            let mut index = 0;
-            let sector = &self.sectors[38]; {
-            // for sector in &self.sectors {
-                //let sub_sector = &sector.sub_sectors[0]; {
-                for sub_sector in &sector.sub_sectors {
-                //let sub_sector = sector.sub_sectors[1]; {
-                    let mut verts = Vec::new();
-                    for segment_index in 0..sub_sector.count {
-                    //let segment_index = self.sub_sector_index; {
-                        let segment = self.gl_segments[sub_sector.start + segment_index];
-
-                        let vs_index = segment.start_vertex;
-                        let ve_index = segment.end_vertex;
-
-                        let vs = if vs_index & VERT_IS_GL == VERT_IS_GL {
-                            self.gl_vertices[vs_index & !VERT_IS_GL]
-                        } else {
-                            self.vertices[vs_index]
-                        };
-
-                        let ve = if ve_index & VERT_IS_GL == VERT_IS_GL {
-                            self.gl_vertices[ve_index & !VERT_IS_GL]
-                        } else {
-                            self.vertices[ve_index]
-                        };
-
-                        verts.push(vs);
-
-                        draw_line_p(vs.x, vs.y, ve.x, ve.y, 1.0, [0.0, 1.0, 0.0, 1.0]);
-                    }
-
-                    verts.dedup();
-
-                    cleanup_lines(&mut verts);
-                    let triangles = triangulate(&verts).unwrap();
-
-                    // polygon(COLOR_TABLE[index], &points, view, gl);
-
-                    for i in 0..(triangles.len() / 3) {
-                        let p1 = &verts[triangles[i + 0] as usize];
-                        let p2 = &verts[triangles[i + 1] as usize];
-                        let p3 = &verts[triangles[i + 2] as usize];
-
-                        draw_line_p(p1.x, p1.y, p2.x, p2.y, 1.0, [0.3, 1.0, 0.3, 1.0]);
-                        draw_line_p(p2.x, p2.y, p3.x, p3.y, 1.0, [0.3, 1.0, 0.3, 1.0]);
-                        draw_line_p(p3.x, p3.y, p1.x, p1.y, 1.0, [0.3, 1.0, 0.3, 1.0]);
-                    }
-
-                    index += 1;
-                    if index >= COLOR_TABLE.len() {
-                        index = 0;
-                    }
-
-                    for v in &verts {
-                        draw_vertex(*v, [1.0, 0.0, 1.0, 1.0]);
-                    }
-                }
-            }
-            /*
-
-            let node = self.gl_nodes[0];
-
-            draw_line_p(node.x, node.y, node.x + node.dx, node.y + node.dx, 1.0, [0.0, 0.0, 1.0, 1.0]);
-
-            let x = node.right_box.left;
-            let y = node.right_box.top;
-            let w = node.right_box.left - node.right_box.right;
-            let h = node.right_box.top - node.right_box.right;
-
-            draw_line_p(x, y, x + w, y, 1.0, [0.0, 1.0, 1.0, 1.0]);
-            draw_line_p(x + w, y, x + w, y + h, 1.0, [0.0, 1.0, 1.0, 1.0]);
-            // draw_line_p(x + w, y, x, y + h, 1.0, [0.0, 1.0, 1.0, 1.0]);
-            // draw_line_p(x, y, x + w, y, 1.0, [0.0, 1.0, 1.0, 1.0]);
-
-            */
-            /*
-            for sub_sector in &self.sub_sectors {
-                for seg_index in 0..sub_sector.segment_count {
-                    let segment = self.segments[sub_sector.start_segment + seg_index];
-
-                    let vs_index = segment.start_vertex;
-                    let ve_index = segment.end_vertex;
-
-                    if segment.line_index != 0xffff {
-                        let line = self.lines[segment.line_index];
-                        // draw_line(line.line, 0.5, [1.0, 0.0, 1.0, 1.0]);
-                    }
-
-                    let vs = if vs_index & VERT_IS_GL == VERT_IS_GL {
-                        self.gl_vertices[vs_index & !VERT_IS_GL]
-                    } else {
-                        self.vertices[vs_index]
-                    };
-
-                    let ve = if ve_index & VERT_IS_GL == VERT_IS_GL {
-                        self.gl_vertices[ve_index & !VERT_IS_GL]
-                    } else {
-                        self.vertices[ve_index]
-                    };
-
-                    draw_vertex(vs, [1.0, 0.0, 1.0, 1.0]);
-                    draw_vertex(ve, [1.0, 0.0, 1.0, 1.0]);
-                    // draw_line_p(vs.x, vs.y, ve.x, ve.y, 1.0, [0.0, 1.0, 0.0, 1.0]);
-                }
-            }
-            */
-
-            /*
-            for sub_sector in &self.gl_sub_sectors {
-                for seg_index in 0..sub_sector.segment_count {
-                    let segment = self.gl_segments[sub_sector.start_segment + seg_index];
-
-                    let vs_index = segment.start_vertex;
-                    let ve_index = segment.end_vertex;
-
-                    if segment.line_index != 0xffff {
-                        let line = self.lines[segment.line_index];
-                        // draw_line(line.line, 0.5, [1.0, 0.0, 1.0, 1.0]);
-                    }
-
-                    let vs = if vs_index & VERT_IS_GL == VERT_IS_GL {
-                        self.gl_vertices[vs_index & !VERT_IS_GL]
-                    } else {
-                        self.vertices[vs_index]
-                    };
-
-                    let ve = if ve_index & VERT_IS_GL == VERT_IS_GL {
-                        self.gl_vertices[ve_index & !VERT_IS_GL]
-                    } else {
-                        self.vertices[ve_index]
-                    };
-
-                    draw_vertex(vs, [0.0, 0.0, 1.0, 1.0]);
-                    draw_vertex(ve, [0.0, 0.0, 1.0, 1.0]);
-                    draw_line_p(vs.x, vs.y, ve.x, ve.y, 1.0, [0.0, 1.0, 0.0, 1.0]);
-                }
-            }
-            */
 
         });
     }
