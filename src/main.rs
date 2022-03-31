@@ -57,8 +57,16 @@ impl Map {
         let vertex_buffer_offset = buffer.len();
         for vert in &self.vertices {
             // TODO(patrik): Should we use f64 or should we use f32
-            buffer.extend_from_slice(&vert.x.to_bits().to_le_bytes());
-            buffer.extend_from_slice(&vert.y.to_bits().to_le_bytes());
+
+            // Vertex Position (x, y)
+            buffer.extend_from_slice(&vert.x.to_le_bytes());
+            buffer.extend_from_slice(&vert.y.to_le_bytes());
+
+            // Vertex Color (r, g, b, a)
+            buffer.extend_from_slice(&vert.color[0].to_le_bytes());
+            buffer.extend_from_slice(&vert.color[1].to_le_bytes());
+            buffer.extend_from_slice(&vert.color[2].to_le_bytes());
+            buffer.extend_from_slice(&vert.color[3].to_le_bytes());
         }
 
         let index_buffer_offset = buffer.len();
@@ -88,18 +96,7 @@ impl Map {
 struct MyVertex {
     x: f64,
     y: f64,
-}
-
-impl std::ops::Sub for MyVertex {
-    type Output = MyVertex;
-
-    fn sub(self, rhs: MyVertex) -> Self {
-        let x = self.x - rhs.x;
-        let y = self.y - rhs.y;
-
-        MyVertex { x, y }
-    }
-
+    color: [f32; 4],
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -326,6 +323,7 @@ fn test_wad_data(app: &mut App) {
             app.vertices.push(MyVertex {
                 x: x.try_into().unwrap(),
                 y: y.try_into().unwrap(),
+                color: [0.0, 0.0, 0.0, 0.0]
             });
         }
     }
@@ -376,8 +374,8 @@ fn test_wad_data(app: &mut App) {
                 lines: Vec::new(),
                 sub_sectors: Vec::new(),
 
-                box_start: MyVertex { x: 0.0, y: 0.0 },
-                box_end: MyVertex { x: 0.0, y: 0.0 },
+                box_start: MyVertex { x: 0.0, y: 0.0, color: [0.0, 0.0, 0.0, 0.0] },
+                box_end: MyVertex { x: 0.0, y: 0.0, color: [0.0, 0.0, 0.0, 0.0] },
             });
         }
     }
@@ -473,6 +471,8 @@ fn test_wad_data(app: &mut App) {
             app.gl_vertices.push(MyVertex {
                 x: x,
                 y: y,
+
+                color: [0.0, 0.0, 0.0, 0.0],
             });
         }
     }
@@ -581,6 +581,7 @@ fn test_wad_data(app: &mut App) {
         }
     }
 
+    /*
     let min_val = |a: f64, b: f64| {
         if a < b { a } else { b }
     };
@@ -637,6 +638,7 @@ fn test_wad_data(app: &mut App) {
         (*sector).box_start = min;
         (*sector).box_end = max;
     }
+    */
 
     // Fix subsectors
 
@@ -666,45 +668,55 @@ fn test_wad_data(app: &mut App) {
         indices.push(index);
     };
 
-    let sector = &app.sectors[38];
-    let sub_sector = sector.sub_sectors[0]; {
-    //for sub_sector in &sector.sub_sectors {
-        let mut seg_verts = Vec::new();
-        for segment in 0..sub_sector.count {
-            let segment = app.gl_segments[sub_sector.start + segment];
+    let mut index = 0;
+    //let sector = &app.sectors[38]; {
+    for sector in &app.sectors {
+        for sub_sector in &sector.sub_sectors {
+        //let sub_sector = sector.sub_sectors[0]; {
+            let mut seg_verts = Vec::new();
+                println!("Seg Count: {}", sub_sector.count);
+            for segment in 0..sub_sector.count {
+                let segment = app.gl_segments[sub_sector.start + segment];
 
-            let vs_index = segment.start_vertex;
-            let ve_index = segment.end_vertex;
+                let vs_index = segment.start_vertex;
+                let ve_index = segment.end_vertex;
 
-            let vs = if vs_index & VERT_IS_GL == VERT_IS_GL {
-                app.gl_vertices[vs_index & !VERT_IS_GL]
-            } else {
-                app.vertices[vs_index]
-            };
+                let mut vs = if vs_index & VERT_IS_GL == VERT_IS_GL {
+                    app.gl_vertices[vs_index & !VERT_IS_GL]
+                } else {
+                    app.vertices[vs_index]
+                };
 
-            let ve = if ve_index & VERT_IS_GL == VERT_IS_GL {
-                app.gl_vertices[ve_index & !VERT_IS_GL]
-            } else {
-                app.vertices[ve_index]
-            };
+                let ve = if ve_index & VERT_IS_GL == VERT_IS_GL {
+                    app.gl_vertices[ve_index & !VERT_IS_GL]
+                } else {
+                    app.vertices[ve_index]
+                };
 
-            seg_verts.push(vs);
-            seg_verts.push(ve);
-        }
+                vs.color = COLOR_TABLE[index];
+                seg_verts.push(vs);
+            }
 
-        seg_verts.dedup();
+            // seg_verts.dedup();
 
-        cleanup_lines(&mut seg_verts);
-        let triangles = triangulate(&seg_verts).unwrap();
-        println!("Num triangles: {}", triangles.len() / 3);
-        for ti in 0..(triangles.len() / 3) {
-            let p1 = triangles[ti + 0];
-            let p2 = triangles[ti + 1];
-            let p3 = triangles[ti + 2];
+            cleanup_lines(&mut seg_verts);
+            let triangles = triangulate(&seg_verts).unwrap();
+            println!("Num triangles: {}", triangles.len() / 3);
 
-            add_vert(p1);
-            add_vert(p3);
-            add_vert(p2);
+            let index_offset = vertices.len();
+
+            for v in &seg_verts {
+                vertices.push(*v);
+            }
+
+            for i in &triangles {
+                indices.push(i + index_offset as u32);
+            }
+
+            index += 1;
+            if index >= COLOR_TABLE.len() {
+                index = 0;
+            }
         }
     }
 
@@ -718,48 +730,6 @@ fn test_wad_data(app: &mut App) {
     map.save_to_file("map.mup").unwrap();
     panic!();
 }
-
-fn point_in_polygon(verts: &Vec<MyVertex>, point: MyVertex) -> bool {
-    let mut angle = 0.0;
-
-    for i in 0..verts.len() {
-        let p1 = MyVertex {
-            x: verts[i].x - point.x,
-            y: verts[i].y - point.y,
-        };
-
-        let p2 = MyVertex {
-            x: verts[(i + 1) % verts.len()].x - point.x,
-            y: verts[(i + 1) % verts.len()].y - point.y
-        };
-
-        angle += angle_2d(p1.x, p1.y, p2.x, p2.y);
-    }
-
-    return if angle.abs() < std::f64::consts::PI {
-        false
-    }
-    else {
-        true
-    };
-}
-
-fn angle_2d(x1: f64, y1: f64, x2: f64, y2: f64) -> f64 {
-   let theta1 = y1.atan2(x1);
-   let theta2 = y2.atan2(x2);
-   let mut dtheta = theta2 - theta1;
-
-   while dtheta > std::f64::consts::PI {
-      dtheta -= std::f64::consts::PI * 2.0;
-   }
-
-   while dtheta < -std::f64::consts::PI {
-      dtheta += std::f64::consts::PI * 2.0;
-   }
-
-   dtheta
-}
-
 
 fn index_vec<T>(v: &Vec<T>, i: isize) -> T
     where T: Copy
@@ -775,63 +745,34 @@ fn index_vec<T>(v: &Vec<T>, i: isize) -> T
     };
 }
 
-fn cross(a: MyVertex, b: MyVertex) -> f64 {
-    return a.x * b.y - a.y * b.x;
-}
+fn triangulate(polygon: &Vec<MyVertex>) -> Option<Vec<u32>> {
+    let mut indices = Vec::new();
 
-fn magnitude(a: MyVertex) -> f64 {
-    return (a.x * a.x + a.y * a.y).sqrt()
-}
+    let mut p0 = 0u32;
+    let mut p1 = 1u32;
 
-fn point_in_triangle(p: MyVertex, a: MyVertex, b: MyVertex, c: MyVertex) -> bool {
-    let ab = b - a;
-    let bc = c - b;
-    let ca = a - c;
-
-    let ap = p - a;
-    let bp = p - b;
-    let cp = p - c;
-
-    let c1 = cross(ab, ap);
-    let c2 = cross(bc, bp);
-    let c3 = cross(ca, cp);
-
-    if c1 > 0.0 || c2 > 0.0 || c3 > 0.0 {
-        return false;
-    }
-
-    true
-}
-
-fn triangulate(polygon: &Vec<MyVertex>) -> Option<Vec<MyVertex>> {
-    let mut vertices = Vec::new();
-
-    let mut polygon = polygon.iter();
-
-    let fp = match polygon.next() {
-        Some(val) => val,
-        None => return None,
-    };
-
-    let mut gp = match polygon.next() {
-        Some(val) => val,
-        None => return None,
-    };
+    let mut index = 2;
 
     loop {
-        vertices.push(*fp);
+        if index >= polygon.len() {
+            break;
+        }
 
-        let p = match polygon.next() {
-            Some(val) => val,
-            None => break,
-        };
+        indices.push(p0);
 
-        vertices.push(*gp);
-        vertices.push(*p);
-        gp = p;
+        let p2 = index as u32;
+
+        indices.push(p1);
+        indices.push(p2);
+
+        p1 = p2;
+
+        index += 1;
     }
 
-    Some(vertices)
+    println!("Indices: {:?}", indices);
+
+    Some(indices)
 }
 
 fn line_angle(a: MyVertex, b: MyVertex) -> f64 {
@@ -843,8 +784,6 @@ fn point_on_line(a: MyVertex, b: MyVertex, c: MyVertex) -> bool {
 }
 
 fn cleanup_lines(verts: &mut Vec<MyVertex>) {
-    println!("Before: {}", verts.len());
-
     for mut i in 0..(verts.len() as isize) {
         let p1 = index_vec(verts, i);
         let p2 = index_vec(verts, i.wrapping_add(1));
@@ -855,8 +794,6 @@ fn cleanup_lines(verts: &mut Vec<MyVertex>) {
             i -= 1;
         }
     }
-
-    println!("After: {}", verts.len());
 }
 
 impl App {
@@ -913,10 +850,12 @@ impl App {
                 let max_x = b.max_x;
                 let max_y = b.max_y;
 
+                /*
                 draw_vertex(MyVertex { x: min_x, y: min_y }, c);
                 draw_vertex(MyVertex { x: max_x, y: min_y }, c);
                 draw_vertex(MyVertex { x: max_x, y: max_y }, c);
                 draw_vertex(MyVertex { x: min_x, y: max_y }, c);
+                */
 
                 draw_line_p(min_x, min_y, max_x, min_y, 1.0, c);
                 draw_line_p(max_x, min_y, max_x, max_y, 1.0, c);
@@ -999,11 +938,12 @@ impl App {
             let mut index = 0;
             let sector = &self.sectors[38]; {
             // for sector in &self.sectors {
-                let sub_sector = &sector.sub_sectors[0]; {
-                // for sub_sector in &sector.sub_sectors {
+                //let sub_sector = &sector.sub_sectors[0]; {
+                for sub_sector in &sector.sub_sectors {
                 //let sub_sector = sector.sub_sectors[1]; {
                     let mut verts = Vec::new();
                     for segment_index in 0..sub_sector.count {
+                    //let segment_index = self.sub_sector_index; {
                         let segment = self.gl_segments[sub_sector.start + segment_index];
 
                         let vs_index = segment.start_vertex;
@@ -1022,30 +962,21 @@ impl App {
                         };
 
                         verts.push(vs);
-                        verts.push(ve);
 
                         draw_line_p(vs.x, vs.y, ve.x, ve.y, 1.0, [0.0, 1.0, 0.0, 1.0]);
                     }
 
                     verts.dedup();
 
-                    let mut points = Vec::new();
-                    for v in &verts {
-                        // points.push(Point { x: v.x, y: v.y });
-                        points.push([v.x, v.y]);
-                    }
-
-                    // let triangles = delaunator::triangulate(&points).triangles;
                     cleanup_lines(&mut verts);
                     let triangles = triangulate(&verts).unwrap();
-                    // println!("Triangles: {}", triangles.len());
 
                     // polygon(COLOR_TABLE[index], &points, view, gl);
 
                     for i in 0..(triangles.len() / 3) {
-                        let p1 = &triangles[i + 0];
-                        let p2 = &triangles[i + 1];
-                        let p3 = &triangles[i + 2];
+                        let p1 = &verts[triangles[i + 0] as usize];
+                        let p2 = &verts[triangles[i + 1] as usize];
+                        let p3 = &verts[triangles[i + 2] as usize];
 
                         draw_line_p(p1.x, p1.y, p2.x, p2.y, 1.0, [0.3, 1.0, 0.3, 1.0]);
                         draw_line_p(p2.x, p2.y, p3.x, p3.y, 1.0, [0.3, 1.0, 0.3, 1.0]);
