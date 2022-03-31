@@ -78,9 +78,9 @@ impl Map {
         buffer[index_buffer_header + 8..index_buffer_header + 16].clone_from_slice(&index_buffer_count.to_le_bytes());
 
         let mut file = File::create(filename).ok()?;
-        file.write_all(&buffer[..]);
+        file.write_all(&buffer[..]).ok()?;
 
-        None
+        Some(())
     }
 }
 
@@ -581,49 +581,6 @@ fn test_wad_data(app: &mut App) {
         }
     }
 
-    let mut mini_segments = Vec::new();
-
-    for sub_sector in &app.gl_sub_sectors {
-        let mut normal_segments = Vec::new();
-
-        for i in 0..sub_sector.count {
-            let segment = app.gl_segments[sub_sector.start + i];
-
-            if segment.linedef != 0xffff {
-                normal_segments.push((i, segment));
-            } else {
-                mini_segments.push((i, segment));
-            }
-        }
-
-        for (_segment_index, segment) in &normal_segments {
-            let linedef = app.lines[segment.linedef];
-            let sidedef = if segment.side == 0 {
-                linedef.front_sidedef.unwrap()
-            } else if segment.side == 1 {
-                linedef.back_sidedef.unwrap()
-            } else {
-                panic!("wot");
-            };
-
-            let sidedef = app.sidedefs[sidedef];
-            app.sectors[sidedef.sector].lines.push(linedef);
-            // app.sectors[sidedef.sector].segments.push(*segment);
-        }
-
-        // TODO(patrik): Look at the normal segments inside here
-        // And find their sector to live in
-        // Then look at the mini segments and add them also to the same sector
-
-        // TODO(patrik): We need to find if minisegs are inside sectors
-        // We could test and see if ray-casting polygon
-        // https://wrf.ecse.rpi.edu/Research/Short_Notes/pnpoly.html
-        // https://stackoverflow.com/questions/217578/how-can-i-determine-whether-a-2d-point-is-within-a-polygon
-
-        // println!("Normal Segments: {}", normal_segments.len());
-        // println!("Mini Segments: {}", mini_segments.len());
-    }
-
     let min_val = |a: f64, b: f64| {
         if a < b { a } else { b }
     };
@@ -683,7 +640,6 @@ fn test_wad_data(app: &mut App) {
 
     // Fix subsectors
 
-    let mut used_sub_sectors = 0;
     for sub_sector in &app.gl_sub_sectors {
         let segment = app.gl_segments[sub_sector.start];
         if segment.linedef != 0xffff {
@@ -701,56 +657,66 @@ fn test_wad_data(app: &mut App) {
         }
     }
 
-    /*
-    //let sector = &mut app.sectors[29];
-    for sector in app.sectors.iter_mut() {
-        let mut polygon = Vec::new();
-        for segment in &sector.segments {
-            let line = app.lines[segment.linedef];
-            let line = line.line;
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
 
-            let start = if line.start_vertex & VERT_IS_GL == VERT_IS_GL {
-                app.gl_vertices[line.start_vertex & !VERT_IS_GL]
+    let mut add_vert = |v| {
+        let index: u32 = vertices.len().try_into().unwrap();
+        vertices.push(v);
+        indices.push(index);
+    };
+
+    let sector = &app.sectors[38];
+    let sub_sector = sector.sub_sectors[0]; {
+    //for sub_sector in &sector.sub_sectors {
+        let mut seg_verts = Vec::new();
+        for segment in 0..sub_sector.count {
+            let segment = app.gl_segments[sub_sector.start + segment];
+
+            let vs_index = segment.start_vertex;
+            let ve_index = segment.end_vertex;
+
+            let vs = if vs_index & VERT_IS_GL == VERT_IS_GL {
+                app.gl_vertices[vs_index & !VERT_IS_GL]
             } else {
-                app.vertices[line.start_vertex]
+                app.vertices[vs_index]
             };
 
-            let end = if line.end_vertex & VERT_IS_GL == VERT_IS_GL {
-                app.gl_vertices[line.end_vertex & !VERT_IS_GL]
+            let ve = if ve_index & VERT_IS_GL == VERT_IS_GL {
+                app.gl_vertices[ve_index & !VERT_IS_GL]
             } else {
-                app.vertices[line.end_vertex]
+                app.vertices[ve_index]
             };
 
-            polygon.push(start);
-            polygon.push(end);
+            seg_verts.push(vs);
+            seg_verts.push(ve);
         }
 
-        // polygon.dedup();
+        seg_verts.dedup();
 
-        println!("Before Segments: {}", sector.segments.len());
+        cleanup_lines(&mut seg_verts);
+        let triangles = triangulate(&seg_verts).unwrap();
+        println!("Num triangles: {}", triangles.len() / 3);
+        for ti in 0..(triangles.len() / 3) {
+            let p1 = triangles[ti + 0];
+            let p2 = triangles[ti + 1];
+            let p3 = triangles[ti + 2];
 
-        for (index, segment) in &mini_segments {
-            let start = if segment.start_vertex & VERT_IS_GL == VERT_IS_GL {
-                app.gl_vertices[segment.start_vertex & !VERT_IS_GL]
-            } else {
-                app.vertices[segment.start_vertex]
-            };
-
-            let end = if segment.end_vertex & VERT_IS_GL == VERT_IS_GL {
-                app.gl_vertices[segment.end_vertex & !VERT_IS_GL]
-            } else {
-                app.vertices[segment.end_vertex]
-            };
-
-            if point_in_polygon(&polygon, start) && point_in_polygon(&polygon, end) {
-                sector.segments.push(*segment);
-            }
+            add_vert(p1);
+            add_vert(p3);
+            add_vert(p2);
         }
-
-        println!("After Segments: {}", sector.segments.len());
     }
-    */
 
+    println!("Vertices: {}", vertices.len());
+
+    let map = Map {
+        vertices,
+        indices,
+    };
+
+    map.save_to_file("map.mup").unwrap();
+    panic!();
 }
 
 fn point_in_polygon(verts: &Vec<MyVertex>, point: MyVertex) -> bool {
@@ -1033,8 +999,9 @@ impl App {
             let mut index = 0;
             let sector = &self.sectors[38]; {
             // for sector in &self.sectors {
-                // let sub_sector = &sector.sub_sectors[1]; {
-                for sub_sector in &sector.sub_sectors {
+                let sub_sector = &sector.sub_sectors[0]; {
+                // for sub_sector in &sector.sub_sectors {
+                //let sub_sector = sector.sub_sectors[1]; {
                     let mut verts = Vec::new();
                     for segment_index in 0..sub_sector.count {
                         let segment = self.gl_segments[sub_sector.start + segment_index];
@@ -1069,12 +1036,12 @@ impl App {
                     }
 
                     // let triangles = delaunator::triangulate(&points).triangles;
+                    cleanup_lines(&mut verts);
                     let triangles = triangulate(&verts).unwrap();
                     // println!("Triangles: {}", triangles.len());
 
                     // polygon(COLOR_TABLE[index], &points, view, gl);
 
-                    /*
                     for i in 0..(triangles.len() / 3) {
                         let p1 = &triangles[i + 0];
                         let p2 = &triangles[i + 1];
@@ -1084,7 +1051,6 @@ impl App {
                         draw_line_p(p2.x, p2.y, p3.x, p3.y, 1.0, [0.3, 1.0, 0.3, 1.0]);
                         draw_line_p(p3.x, p3.y, p1.x, p1.y, 1.0, [0.3, 1.0, 0.3, 1.0]);
                     }
-                    */
 
                     index += 1;
                     if index >= COLOR_TABLE.len() {
@@ -1211,30 +1177,6 @@ impl App {
 }
 
 fn main() {
-    // 0 *    * 3
-    // 1 *    * 2
-    let vertices = vec![
-        MyVertex { x: 0.0, y: 0.0 },
-        MyVertex { x: 0.0, y: 1.0 },
-        MyVertex { x: 1.0, y: 1.0 },
-        MyVertex { x: 1.0, y: 0.0 },
-    ];
-
-    // 0 3 2
-    // 3 1 0
-
-    let indices = vec![
-        0, 2, 1, 0, 3, 2
-    ];
-
-    let map = Map {
-        vertices,
-        indices
-    };
-
-    map.save_to_file("map.mup")
-        .expect("Failed to save map");
-
     // Change this to OpenGL::V2_1 if not working.
     let opengl = OpenGL::V3_2;
 
