@@ -1,6 +1,6 @@
 use std::path::Path;
 use std::fs::File;
-use std::io::{ Read, Write };
+use std::io::Read;
 
 use glutin_window::GlutinWindow as Window;
 use opengl_graphics::{GlGraphics, OpenGL};
@@ -25,7 +25,6 @@ static COLOR_TABLE: [[f32; 4]; 10] = [
     [0.7176470588235294, 0.32941176470588235, 0.156862745098039200, 1.0],
     [0.6274509803921569, 0.31372549019607840, 0.011764705882352941, 1.0],
 ];
-
 
 struct App {
     gl: GlGraphics, // OpenGL drawing backend.
@@ -53,202 +52,18 @@ fn read_file<P>(path: P) -> Vec<u8>
 }
 
 
-fn load_wad_map_data() -> Option<wad::Map> {
+fn load_wad_map_data() -> wad::Map {
+    // Read the raw wad file
     let data = read_file("doom1.wad");
-    let wad = Wad::parse(&data).expect("Failed to parse WAD file");
+    // Parse the wad
+    let wad = Wad::parse(&data)
+        .expect("Failed to parse WAD file");
 
-    let mut map = wad::Map::parse_from_wad(&wad, "E1M1")
+    // Construct an map with map from the wad
+    let map = wad::Map::parse_from_wad(&wad, "E1M1")
         .expect("Failed to load map E1M1");
 
-    let index = wad.find_dir("E1M1").unwrap();
-
-    {
-        let vertices = wad.read_dir(index + 4).unwrap();
-
-        let num_vertices = vertices.len() / 4;
-        println!("Num vertices: {}", num_vertices);
-
-        for index in 0..num_vertices {
-            let start = index * 4;
-            let data = &vertices[start..start + 4];
-
-            let x = i16::from_le_bytes(data[0..2].try_into().unwrap());
-            let y = i16::from_le_bytes(data[2..4].try_into().unwrap());
-
-            map.vertices.push(wad::Vertex {
-                x: x.try_into().unwrap(),
-                y: y.try_into().unwrap(),
-            });
-        }
-    }
-
-    {
-        let lines = wad.read_dir(index + 2).unwrap();
-
-        let num_lines = lines.len() / 14;
-        println!("Num lines: {}", num_lines);
-
-        for index in 0..num_lines {
-            let start = index * 14;
-            let data = &lines[start..start + 14];
-
-            let start_vertex = i16::from_le_bytes(data[0..2].try_into().unwrap());
-            let end_vertex = i16::from_le_bytes(data[2..4].try_into().unwrap());
-
-            let front_sidedef = i16::from_le_bytes(data[10..12].try_into().unwrap());
-            let back_sidedef = i16::from_le_bytes(data[12..14].try_into().unwrap());
-
-            map.lines.push(wad::Linedef {
-                line: wad::Line {
-                    start_vertex: start_vertex.try_into().unwrap(),
-                    end_vertex: end_vertex.try_into().unwrap(),
-                },
-                front_sidedef: if front_sidedef == -1 { None } else { Some(front_sidedef.try_into().unwrap()) },
-                back_sidedef: if back_sidedef == -1 { None } else { Some(back_sidedef.try_into().unwrap()) },
-            });
-        }
-    }
-
-    {
-        let data = wad.read_dir(index + 3).unwrap();
-
-        let len = data.len() / 26;
-        println!("Num sectors: {}", len);
-
-        for index in 0..len {
-            let start = index * 26;
-            let data = &data[start..start + 26];
-
-            let floor_height = i16::from_le_bytes(data[0..2].try_into().unwrap());
-            let ceiling_height = i16::from_le_bytes(data[2..4].try_into().unwrap());
-
-            map.sectors.push(wad::Sector {
-                floor_height: floor_height.try_into().unwrap(),
-                ceiling_height: ceiling_height.try_into().unwrap(),
-                lines: Vec::new(),
-                sub_sectors: Vec::new(),
-            });
-        }
-    }
-
-    {
-        let data = wad.read_dir(index + 3).unwrap();
-
-        let len = data.len() / 30;
-        println!("Num sidedefs: {}", len);
-
-        for index in 0..len {
-            let start = index * 30;
-            let data = &data[start..start + 30];
-
-            let sector = i16::from_le_bytes(data[28..30].try_into().unwrap());
-            map.sidedefs.push(wad::Sidedef {
-                sector: sector.try_into().unwrap(),
-            });
-        }
-    }
-
-    // Parse the GL_VERT
-    {
-        let data = wad.read_dir(index + 12).unwrap();
-
-        let gl_magic = &data[0..4];
-        println!("GL_VERT Magic: {:?}", std::str::from_utf8(&gl_magic));
-
-        let data = &data[4..];
-
-        // -4 because there is a 4 byte magic
-        let len = data.len() / 8;
-        println!("Num GL_VERT: {}", len);
-
-        for index in 0..len {
-            let start = index * 8;
-            let data = &data[start..start + 8];
-
-            let x = i32::from_le_bytes(data[0..4].try_into().unwrap());
-            let y = i32::from_le_bytes(data[4..8].try_into().unwrap());
-
-            let x = x as f32 / 65536.0;
-            let y = y as f32 / 65536.0;
-
-            map.gl_vertices.push(wad::Vertex {
-                x: x,
-                y: y,
-            });
-        }
-    }
-
-    // Parse the GL_SSECT
-    {
-        let data = wad.read_dir(index + 14).unwrap();
-        // TODO(patrik): Look for magic
-
-        let len = data.len() / 4;
-        println!("Num GL_SSECT: {}", len);
-
-        for index in 0..len {
-            let start = index * 4;
-            let data = &data[start..start + 4];
-
-            let count = u16::from_le_bytes(data[0..2].try_into().unwrap());
-            let start = u16::from_le_bytes(data[2..4].try_into().unwrap());
-
-            map.sub_sectors.push(wad::SubSector {
-                start: start.try_into().unwrap(),
-                count: count.try_into().unwrap(),
-            });
-        }
-    }
-
-    // Parse the GL_SEGS
-    {
-        let data = wad.read_dir(index + 13).unwrap();
-        // TODO(patrik): Look for magic
-
-        let len = data.len() / 10;
-        println!("Num GL_SEGS: {}", len);
-
-        for index in 0..len {
-            let start = index * 10;
-            let data = &data[start..start + 10];
-
-            let start_vertex = u16::from_le_bytes(data[0..2].try_into().unwrap());
-            let end_vertex = u16::from_le_bytes(data[2..4].try_into().unwrap());
-
-            let linedef = u16::from_le_bytes(data[4..6].try_into().unwrap());
-            let side = u16::from_le_bytes(data[6..8].try_into().unwrap());
-            let partner_segment = u16::from_le_bytes(data[8..10].try_into().unwrap());
-
-            map.segments.push(wad::Segment {
-                start_vertex: start_vertex.try_into().unwrap(),
-                end_vertex: end_vertex.try_into().unwrap(),
-
-                linedef: linedef.try_into().unwrap(),
-                side: side.try_into().unwrap(),
-                partner_segment: partner_segment.try_into().unwrap(),
-            });
-        }
-    }
-
-    // Sort subsectors to sectors
-
-    for sub_sector in &map.sub_sectors {
-        let segment = map.segments[sub_sector.start];
-        if segment.linedef != 0xffff {
-            let linedef = map.lines[segment.linedef];
-            let sidedef = if segment.side == 0 {
-                linedef.front_sidedef.unwrap()
-            } else if segment.side == 1 {
-                linedef.back_sidedef.unwrap()
-            } else {
-                panic!("Unknown segment side: {}", segment.side);
-            };
-
-            let sidedef = map.sidedefs[sidedef];
-            map.sectors[sidedef.sector].sub_sectors.push(*sub_sector);
-        }
-    }
-
+    // Generate the vertices and indices for the map
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
 
@@ -258,8 +73,7 @@ fn load_wad_map_data() -> Option<wad::Map> {
             let mut seg_verts = Vec::new();
             for segment in 0..sub_sector.count {
                 let segment = map.segments[sub_sector.start + segment];
-
-                let mut start = map.vertex(segment.start_vertex);
+                let start = map.vertex(segment.start_vertex);
 
                 let color = COLOR_TABLE[index];
                 seg_verts.push(mime::Vertex::new(start.x, start.y, color));
@@ -285,24 +99,11 @@ fn load_wad_map_data() -> Option<wad::Map> {
         }
     }
 
-    let map = mime::Map::new(vertices, indices);
+    let mime_map = mime::Map::new(vertices, indices);
+    mime_map.save_to_file("map.mup").unwrap();
 
-    map.save_to_file("map.mup").unwrap();
-    panic!();
-}
 
-fn index_vec<T>(v: &Vec<T>, i: isize) -> T
-    where T: Copy
-{
-    let len: isize = v.len().try_into().unwrap();
-
-    return if i >= len as isize{
-        v[(i % len) as usize]
-    } else if i < 0 {
-        v[(i % len + len) as usize]
-    } else {
-        v[i as usize]
-    };
+    map
 }
 
 fn triangulate(polygon: &Vec<mime::Vertex>) -> Option<Vec<u32>> {
@@ -342,14 +143,13 @@ fn point_on_line(a: mime::Vertex, b: mime::Vertex, c: mime::Vertex) -> bool {
 }
 
 fn cleanup_lines(verts: &mut Vec<mime::Vertex>) {
-    for mut i in 0..(verts.len() as isize) {
-        let p1 = index_vec(verts, i);
-        let p2 = index_vec(verts, i.wrapping_add(1));
-        let p3 = index_vec(verts, i.wrapping_add(2));
+    for i in 0..verts.len() {
+        let p1 = verts[i % verts.len()];
+        let p2 = verts[i.wrapping_add(1) % verts.len()];
+        let p3 = verts[i.wrapping_add(2) % verts.len()];
 
         if point_on_line(p1, p2, p3) {
             verts.remove((i.wrapping_add(1) as usize) % verts.len());
-            i -= 1;
         }
     }
 }

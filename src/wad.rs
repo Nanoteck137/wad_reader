@@ -177,7 +177,7 @@ pub struct Map {
     pub vertices: Vec<Vertex>,
     pub gl_vertices: Vec<Vertex>,
 
-    pub lines: Vec<Linedef>,
+    pub linedefs: Vec<Linedef>,
     pub sidedefs: Vec<Sidedef>,
     pub sectors: Vec<Sector>,
 
@@ -187,11 +187,11 @@ pub struct Map {
 
 impl Map {
     pub fn parse_from_wad(wad: &Wad, map_name: &str) -> Result<Self> {
-        let res = Self {
+        let mut res = Self {
             vertices: Vec::new(),
             gl_vertices: Vec::new(),
 
-            lines: Vec::new(),
+            linedefs: Vec::new(),
             sidedefs: Vec::new(),
             sectors: Vec::new(),
 
@@ -201,7 +201,208 @@ impl Map {
 
         let map_index = wad.find_dir(map_name)?;
 
+        res.load_vertices(wad, map_index)?;
+        res.load_linedefs(wad, map_index)?;
+        res.load_sidedefs(wad, map_index)?;
+        res.load_sectors(wad, map_index)?;
+        res.load_subsectors(wad, map_index)?;
+        res.load_segments(wad, map_index)?;
+
+        res.sort_subsectors()?;
+
         Ok(res)
+    }
+
+    fn load_vertices(&mut self, wad: &Wad, map_index: usize) -> Result<()> {
+        // Load the normal vertices
+        {
+            let data = wad.read_dir(map_index + 4)?;
+
+            let count = data.len() / 4;
+
+            for index in 0..count {
+                let start = index * 4;
+                let data = &data[start..start + 4];
+
+                let x = i16::from_le_bytes(data[0..2].try_into().unwrap());
+                let y = i16::from_le_bytes(data[2..4].try_into().unwrap());
+
+                self.vertices.push(Vertex {
+                    x: x.try_into().unwrap(),
+                    y: y.try_into().unwrap(),
+                });
+            }
+        }
+
+        // Load the extra vertices (GL_VERT)
+        {
+            let data = wad.read_dir(map_index + 12)?;
+
+            //TODO(patrik): Make sure the gl_magic is correct
+            let _gl_magic = &data[0..4];
+
+            let data = &data[4..];
+
+            let count = data.len() / 8;
+
+            for index in 0..count {
+                let start = index * 8;
+                let data = &data[start..start + 8];
+
+                let x = i32::from_le_bytes(data[0..4].try_into().unwrap());
+                let y = i32::from_le_bytes(data[4..8].try_into().unwrap());
+
+                let x = x as f32 / 65536.0;
+                let y = y as f32 / 65536.0;
+
+                self.gl_vertices.push(Vertex {
+                    x: x,
+                    y: y,
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    fn load_linedefs(&mut self, wad: &Wad, map_index: usize) -> Result<()> {
+        let data = wad.read_dir(map_index + 2)?;
+
+        let count = data.len() / 14;
+
+        for index in 0..count {
+            let start = index * 14;
+            let data = &data[start..start + 14];
+
+            let start_vertex = i16::from_le_bytes(data[0..2].try_into().unwrap());
+            let end_vertex = i16::from_le_bytes(data[2..4].try_into().unwrap());
+
+            let front_sidedef = i16::from_le_bytes(data[10..12].try_into().unwrap());
+            let back_sidedef = i16::from_le_bytes(data[12..14].try_into().unwrap());
+
+            self.linedefs.push(Linedef {
+                line: Line {
+                    start_vertex: start_vertex.try_into().unwrap(),
+                    end_vertex: end_vertex.try_into().unwrap(),
+                },
+                front_sidedef: if front_sidedef == -1 { None } else { Some(front_sidedef.try_into().unwrap()) },
+                back_sidedef: if back_sidedef == -1 { None } else { Some(back_sidedef.try_into().unwrap()) },
+            });
+        }
+
+        Ok(())
+    }
+
+    fn load_sidedefs(&mut self, wad: &Wad, map_index: usize) -> Result<()> {
+        let data = wad.read_dir(map_index + 3)?;
+        let count = data.len() / 30;
+
+        for index in 0..count {
+            let start = index * 30;
+            let data = &data[start..start + 30];
+
+            let sector = i16::from_le_bytes(data[28..30].try_into().unwrap());
+            self.sidedefs.push(Sidedef {
+                sector: sector.try_into().unwrap(),
+            });
+        }
+
+        Ok(())
+    }
+
+    fn load_sectors(&mut self, wad: &Wad, map_index: usize) -> Result<()> {
+        let data = wad.read_dir(map_index + 3)?;
+        let count = data.len() / 26;
+
+        for index in 0..count {
+            let start = index * 26;
+            let data = &data[start..start + 26];
+
+            let floor_height = i16::from_le_bytes(data[0..2].try_into().unwrap());
+            let ceiling_height = i16::from_le_bytes(data[2..4].try_into().unwrap());
+
+            self.sectors.push(Sector {
+                floor_height: floor_height.try_into().unwrap(),
+                ceiling_height: ceiling_height.try_into().unwrap(),
+                lines: Vec::new(),
+                sub_sectors: Vec::new(),
+            });
+        }
+
+        Ok(())
+    }
+
+    fn load_subsectors(&mut self, wad: &Wad, map_index: usize) -> Result<()> {
+        let data = wad.read_dir(map_index + 14)?;
+        // TODO(patrik): Look for magic
+
+        let count = data.len() / 4;
+        for index in 0..count {
+            let start = index * 4;
+            let data = &data[start..start + 4];
+
+            let count = u16::from_le_bytes(data[0..2].try_into().unwrap());
+            let start = u16::from_le_bytes(data[2..4].try_into().unwrap());
+
+            self.sub_sectors.push(SubSector {
+                start: start.try_into().unwrap(),
+                count: count.try_into().unwrap(),
+            });
+        }
+
+        Ok(())
+    }
+
+    fn load_segments(&mut self, wad: &Wad, map_index: usize) -> Result<()> {
+        let data = wad.read_dir(map_index + 13)?;
+        // TODO(patrik): Look for magic
+
+        let count = data.len() / 10;
+
+        for index in 0..count {
+            let start = index * 10;
+            let data = &data[start..start + 10];
+
+            let start_vertex = u16::from_le_bytes(data[0..2].try_into().unwrap());
+            let end_vertex = u16::from_le_bytes(data[2..4].try_into().unwrap());
+
+            let linedef = u16::from_le_bytes(data[4..6].try_into().unwrap());
+            let side = u16::from_le_bytes(data[6..8].try_into().unwrap());
+            let partner_segment = u16::from_le_bytes(data[8..10].try_into().unwrap());
+
+            self.segments.push(Segment {
+                start_vertex: start_vertex.try_into().unwrap(),
+                end_vertex: end_vertex.try_into().unwrap(),
+
+                linedef: linedef.try_into().unwrap(),
+                side: side.try_into().unwrap(),
+                partner_segment: partner_segment.try_into().unwrap(),
+            });
+        }
+
+        Ok(())
+    }
+
+    fn sort_subsectors(&mut self) -> Result<()> {
+        for sub_sector in &self.sub_sectors {
+            let segment = self.segments[sub_sector.start];
+            if segment.linedef != 0xffff {
+                let linedef = self.linedefs[segment.linedef];
+                let sidedef = if segment.side == 0 {
+                    linedef.front_sidedef.unwrap()
+                } else if segment.side == 1 {
+                    linedef.back_sidedef.unwrap()
+                } else {
+                    // TODO(patrik): Make error
+                    panic!("Unknown segment side: {}", segment.side);
+                };
+
+                let sidedef = self.sidedefs[sidedef];
+                self.sectors[sidedef.sector].sub_sectors.push(*sub_sector);
+            }
+        }
+
+        Ok(())
     }
 
     pub fn vertex(&self, index: usize) -> Vertex {
