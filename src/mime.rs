@@ -8,14 +8,15 @@ use std::io::Write;
 pub struct Vertex {
     pub x: f32,
     pub y: f32,
+    pub z: f32,
 
     pub color: [f32; 4],
 }
 
 impl Vertex {
-    pub fn new(x: f32, y: f32, color: [f32; 4]) -> Self {
+    pub fn new(x: f32, y: f32, z: f32, color: [f32; 4]) -> Self {
         Self {
-            x, y, color
+            x, y, z, color
         }
     }
 }
@@ -59,6 +60,7 @@ impl Map {
             // Vertex Position (x, y)
             buffer.extend_from_slice(&vert.x.to_le_bytes());
             buffer.extend_from_slice(&vert.y.to_le_bytes());
+            buffer.extend_from_slice(&vert.z.to_le_bytes());
 
             // Vertex Color (r, g, b, a)
             buffer.extend_from_slice(&vert.color[0].to_le_bytes());

@@ -68,45 +68,55 @@ fn load_wad_map_data() -> wad::Map {
     let mut indices = Vec::new();
 
     let mut index = 0;
-    for sector in &map.sectors {
+    // for sector in &map.sectors {
+    let sector = &map.sectors[38]; {
+        println!("Sector: {} -> {}", sector.floor_height, sector.ceiling_height);
         for sub_sector in &sector.sub_sectors {
-            let mut seg_verts = Vec::new();
+            let mut floor = Vec::new();
+            let mut ceiling = Vec::new();
             for segment in 0..sub_sector.count {
                 let segment = map.segments[sub_sector.start + segment];
                 let start = map.vertex(segment.start_vertex);
 
+
                 let color = COLOR_TABLE[index];
-                seg_verts.push(mime::Vertex::new(start.x, start.y, color));
+                floor.push(mime::Vertex::new(start.x, sector.floor_height, start.y, color));
+                ceiling.push(mime::Vertex::new(start.x, sector.ceiling_height, start.y, color));
             }
 
-            cleanup_lines(&mut seg_verts);
-            let triangles = triangulate(&seg_verts).unwrap();
+            let mut add_vertices = |mut verts, clockwise| {
+                cleanup_lines(&mut verts);
+                let triangles = triangulate(&verts, clockwise).unwrap();
 
-            let index_offset = vertices.len();
+                let index_offset = vertices.len();
 
-            for v in &seg_verts {
-                vertices.push(*v);
-            }
+                for v in &verts {
+                    vertices.push(*v);
+                }
 
-            for i in &triangles {
-                indices.push(i + index_offset as u32);
-            }
+                for i in &triangles {
+                    indices.push(i + index_offset as u32);
+                }
 
-            index += 1;
-            if index >= COLOR_TABLE.len() {
-                index = 0;
-            }
+                index += 1;
+                if index >= COLOR_TABLE.len() {
+                    index = 0;
+                }
+            };
+
+            add_vertices(floor, true);
+            add_vertices(ceiling, false);
+
         }
     }
 
     let mime_map = mime::Map::new(vertices, indices);
     mime_map.save_to_file("map.mup").unwrap();
 
-
     map
 }
 
-fn triangulate(polygon: &Vec<mime::Vertex>) -> Option<Vec<u32>> {
+fn triangulate(polygon: &Vec<mime::Vertex>, clockwise: bool) -> Option<Vec<u32>> {
     let mut indices = Vec::new();
 
     let p0 = 0u32;
@@ -115,16 +125,23 @@ fn triangulate(polygon: &Vec<mime::Vertex>) -> Option<Vec<u32>> {
     let mut index = 2;
 
     loop {
+        // 0 1 2 0 2 3
+        // 0 2 1 0 3 2
         if index >= polygon.len() {
             break;
         }
 
-        indices.push(p0);
-
         let p2 = index as u32;
 
-        indices.push(p1);
-        indices.push(p2);
+        if clockwise {
+            indices.push(p0);
+            indices.push(p1);
+            indices.push(p2);
+        } else {
+            indices.push(p0);
+            indices.push(p2);
+            indices.push(p1);
+        }
 
         p1 = p2;
 
@@ -135,7 +152,7 @@ fn triangulate(polygon: &Vec<mime::Vertex>) -> Option<Vec<u32>> {
 }
 
 fn line_angle(a: mime::Vertex, b: mime::Vertex) -> f32 {
-    (b.y - a.y).atan2(b.x - a.x)
+    (b.z - a.z).atan2(b.x - a.x)
 }
 
 fn point_on_line(a: mime::Vertex, b: mime::Vertex, c: mime::Vertex) -> bool {
