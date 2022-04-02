@@ -1,5 +1,7 @@
 //! Module to handle WAD files
 
+pub const LINEDEF_FLAG_IMPASSABLE: usize = 0x0001;
+
 #[derive(Copy, Clone, Debug)]
 pub enum Error {
     ArrayConvertionFailed,
@@ -159,17 +161,19 @@ impl Line {
 #[derive(Copy, Clone, Debug)]
 pub struct Linedef {
     pub line: Line,
+    pub flags: usize,
     pub front_sidedef: Option<usize>,
     pub back_sidedef: Option<usize>,
 }
 
 impl Linedef {
     fn new(line: Line,
+           flags: usize,
            front_sidedef: Option<usize>,
            back_sidedef: Option<usize>)
         -> Self
     {
-        Self { line, front_sidedef, back_sidedef }
+        Self { line, flags, front_sidedef, back_sidedef }
     }
 }
 
@@ -359,6 +363,10 @@ impl Map {
                 data[2..4].try_into()
                     .map_err(|_| Error::ArrayConvertionFailed)?);
 
+            let flags = i32::from_le_bytes(
+                data[4..8].try_into()
+                    .map_err(|_| Error::ArrayConvertionFailed)?);
+
             let front_sidedef = i16::from_le_bytes(
                 data[10..12].try_into()
                     .map_err(|_| Error::ArrayConvertionFailed)?);
@@ -366,8 +374,15 @@ impl Map {
                 data[12..14].try_into()
                     .map_err(|_| Error::ArrayConvertionFailed)?);
 
-            let start_vertex: usize = start_vertex.try_into().map_err(|_| Error::ConvertToUsizeFailed)?;
-            let end_vertex: usize = end_vertex.try_into().map_err(|_| Error::ConvertToUsizeFailed)?;
+            let start_vertex: usize =
+                start_vertex.try_into()
+                    .map_err(|_| Error::ConvertToUsizeFailed)?;
+            let end_vertex: usize =
+                end_vertex.try_into()
+                    .map_err(|_| Error::ConvertToUsizeFailed)?;
+
+            let flags: usize =
+                flags.try_into().map_err(|_| Error::ConvertToUsizeFailed)?;
 
             let line = Line::new(start_vertex, end_vertex);
 
@@ -385,7 +400,7 @@ impl Map {
                         .map_err(|_| Error::ConvertToUsizeFailed)?)
             };
 
-            self.linedefs.push(Linedef::new(line, front_sidedef, back_sidedef));
+            self.linedefs.push(Linedef::new(line, flags, front_sidedef, back_sidedef));
         }
 
         Ok(())
@@ -525,6 +540,21 @@ impl Map {
     }
 
     fn sort_subsectors(&mut self) -> Result<()> {
+        for line in &self.linedefs {
+            let sector = if let Some(side) = line.front_sidedef {
+                let side = self.sidedefs[side];
+                Ok(side.sector)
+            } else if let Some(side) = line.back_sidedef {
+                let side = self.sidedefs[side];
+                Ok(side.sector)
+            } else {
+                continue;
+            }?;
+
+            self.sectors[sector].lines.push(*line);
+
+        }
+
         for sub_sector in &self.sub_sectors {
             let segment = self.segments[sub_sector.start];
             if segment.linedef != 0xffff {

@@ -38,6 +38,8 @@ struct App {
     down: bool,
     zoom_in: bool,
     zoom_out: bool,
+
+    map: wad::Map,
 }
 
 fn read_file<P>(path: P) -> Vec<u8>
@@ -67,10 +69,26 @@ fn load_wad_map_data() -> wad::Map {
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
 
+
+    let mut add_vertices = |mut verts, clockwise| {
+        // cleanup_lines(&mut verts);
+        let triangles = triangulate(&verts, clockwise).unwrap();
+
+        let index_offset = vertices.len();
+
+        for v in &verts {
+            vertices.push(*v);
+        }
+
+        for i in &triangles {
+            indices.push(i + index_offset as u32);
+        }
+    };
+
     let mut index = 0;
-    // for sector in &map.sectors {
-    let sector = &map.sectors[38]; {
-        println!("Sector: {} -> {}", sector.floor_height, sector.ceiling_height);
+    for sector in &map.sectors {
+    //let sector = &map.sectors[38]; {
+        //let sub_sector = sector.sub_sectors[1]; {
         for sub_sector in &sector.sub_sectors {
             let mut floor = Vec::new();
             let mut ceiling = Vec::new();
@@ -78,37 +96,40 @@ fn load_wad_map_data() -> wad::Map {
                 let segment = map.segments[sub_sector.start + segment];
                 let start = map.vertex(segment.start_vertex);
 
-
                 let color = COLOR_TABLE[index];
                 floor.push(mime::Vertex::new(start.x, sector.floor_height, start.y, color));
                 ceiling.push(mime::Vertex::new(start.x, sector.ceiling_height, start.y, color));
+
+                if segment.linedef != 0xffff {
+                    let mut wall = Vec::new();
+                    let linedef = map.linedefs[segment.linedef];
+                    let line = linedef.line;
+                    let start = map.vertex(line.start_vertex);
+                    let end = map.vertex(line.end_vertex);
+
+                    if linedef.flags & wad::LINEDEF_FLAG_IMPASSABLE == wad::LINEDEF_FLAG_IMPASSABLE {
+                        wall.push(mime::Vertex::new(start.x, sector.floor_height, start.y, color));
+                        wall.push(mime::Vertex::new(end.x, sector.floor_height, end.y, color));
+                        wall.push(mime::Vertex::new(end.x, sector.ceiling_height, end.y, color));
+                        wall.push(mime::Vertex::new(start.x, sector.ceiling_height, start.y, color));
+                    }
+
+                    add_vertices(wall, false);
+                }
             }
 
-            let mut add_vertices = |mut verts, clockwise| {
-                cleanup_lines(&mut verts);
-                let triangles = triangulate(&verts, clockwise).unwrap();
-
-                let index_offset = vertices.len();
-
-                for v in &verts {
-                    vertices.push(*v);
-                }
-
-                for i in &triangles {
-                    indices.push(i + index_offset as u32);
-                }
-
-                index += 1;
-                if index >= COLOR_TABLE.len() {
-                    index = 0;
-                }
-            };
+            index += 1;
+            if index >= COLOR_TABLE.len() {
+                index = 0;
+            }
 
             add_vertices(floor, true);
             add_vertices(ceiling, false);
-
         }
     }
+
+    // TODO(patrik): Find lines with multiple sectors
+    // Generate the vertices if those sectors has diffrent hights
 
     let mime_map = mime::Map::new(vertices, indices);
     mime_map.save_to_file("map.mup").unwrap();
@@ -125,8 +146,6 @@ fn triangulate(polygon: &Vec<mime::Vertex>, clockwise: bool) -> Option<Vec<u32>>
     let mut index = 2;
 
     loop {
-        // 0 1 2 0 2 3
-        // 0 2 1 0 3 2
         if index >= polygon.len() {
             break;
         }
@@ -185,23 +204,14 @@ impl App {
 
             let view = c.view.trans(-self.camera_x, self.camera_y).zoom(self.zoom);
 
-            /*
-            let mut draw_line = |l: MyLine, s, c| {
-                let start = if l.start_vertex & VERT_IS_GL == VERT_IS_GL {
-                    self.gl_vertices[l.start_vertex & !VERT_IS_GL]
-                } else {
-                    self.vertices[l.start_vertex]
-                };
-
-                let end = if l.end_vertex & VERT_IS_GL == VERT_IS_GL {
-                    self.gl_vertices[l.end_vertex & !VERT_IS_GL]
-                } else {
-                    self.vertices[l.end_vertex]
-                };
+            let mut draw_line = |l: wad::Line, s, c| {
+                let start = self.map.vertex(l.start_vertex);
+                let end = self.map.vertex(l.end_vertex);
 
                 line_from_to(c, s, [start.x as f64, start.y as f64], [end.x as f64, end.y as f64], view, unsafe { *ptr });
             };
 
+            /*
             let mut draw_line_p = |x1, y1, x2, y2, s, c| {
                 line_from_to(c, s, [x1 as f64, y1 as f64], [x2 as f64, y2 as f64], view, unsafe { *ptr });
             };
@@ -213,6 +223,9 @@ impl App {
 
                 ellipse(c, square, view.append_transform(transform), unsafe { *ptr });
             };
+            */
+
+            /*
 
             let mut draw_box = |b: MyBox, c| {
                 let min_x = b.min_x;
@@ -232,7 +245,24 @@ impl App {
                 draw_line_p(max_x, max_y, min_x, max_y, 1.0, c);
                 draw_line_p(min_x, max_y, min_x, min_y, 1.0, c);
             };
-        */
+    */
+
+        let sector = &self.map.sectors[38]; {
+            //let sub_sector = sector.sub_sectors[1]; {
+            for sub_sector in &sector.sub_sectors {
+                //let segment = 0; {
+                for segment in 0..sub_sector.count {
+                    let segment = self.map.segments[sub_sector.start + segment];
+
+                    if segment.linedef != 0xffff {
+                        let linedef = self.map.linedefs[segment.linedef];
+                        if linedef.flags & wad::LINEDEF_FLAG_IMPASSABLE == wad::LINEDEF_FLAG_IMPASSABLE {
+                            draw_line(linedef.line, 1.0, [1.0, 0.0, 1.0, 1.0]);
+                        }
+                    }
+                }
+            }
+        }
 
         });
     }
@@ -278,6 +308,8 @@ fn main() {
         .build()
         .unwrap();
 
+    let map = load_wad_map_data();
+
     // Create a new game and run it.
     let mut app = App {
         gl: GlGraphics::new(opengl),
@@ -291,9 +323,9 @@ fn main() {
         down: false,
         zoom_in: false,
         zoom_out: false,
-    };
 
-    let map = load_wad_map_data();
+        map,
+    };
 
     let mut events = Events::new(EventSettings::new());
     while let Some(e) = events.next(&mut window) {
