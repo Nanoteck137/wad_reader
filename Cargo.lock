@@ -895,6 +895,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "mime"
+version = "0.1.0"
+source = "git+https://github.com/nanoteck137/mime#b525d8e32a494926cb9a840431ff9d9b6fd22956"
+
+[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1774,6 +1779,7 @@ version = "0.1.0"
 dependencies = [
  "delaunator",
  "earcutr",
+ "mime",
  "piston",
  "piston2d-graphics",
  "piston2d-opengl_graphics",
