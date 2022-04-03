@@ -13,6 +13,13 @@ use wad::Wad;
 mod wad;
 mod mime;
 
+/// TODO(patrik):
+///   - Parse texture data
+///   - Map format
+///     - Seperate vertex and index buffers for the different sectors
+///       of the map
+///     - Textures
+
 static COLOR_TABLE: [[f32; 4]; 10] = [
     [0.6705882352941176, 0.56078431372549020, 0.564705882352941200, 1.0],
     [0.7137254901960784, 0.53333333333333330, 0.223529411764705900, 1.0],
@@ -52,7 +59,6 @@ fn read_file<P>(path: P) -> Vec<u8>
 
     result
 }
-
 
 fn load_wad_map_data() -> wad::Map {
     // Read the raw wad file
@@ -131,12 +137,6 @@ fn load_wad_map_data() -> wad::Map {
             add_vertices(ceiling, false, true);
         }
     }
-
-    // TODO(patrik): Find lines with multiple sectors
-    // Generate the vertices if those sectors has diffrent hights
-
-    // TODO(patrik): With this we generate the same walls for different segments
-    // because the don't check if we already have generate the wall
 
     let mut index = 0;
 
