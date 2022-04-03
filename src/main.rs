@@ -70,8 +70,11 @@ fn load_wad_map_data() -> wad::Map {
     let mut indices = Vec::new();
 
 
-    let mut add_vertices = |mut verts, clockwise| {
-        // cleanup_lines(&mut verts);
+    let mut add_vertices = |mut verts, clockwise, cleanup| {
+        if cleanup {
+            cleanup_lines(&mut verts);
+        }
+
         let triangles = triangulate(&verts, clockwise).unwrap();
 
         let index_offset = vertices.len();
@@ -107,14 +110,16 @@ fn load_wad_map_data() -> wad::Map {
                     let start = map.vertex(line.start_vertex);
                     let end = map.vertex(line.end_vertex);
 
-                    if linedef.flags & wad::LINEDEF_FLAG_IMPASSABLE == wad::LINEDEF_FLAG_IMPASSABLE {
+                    if linedef.flags & wad::LINEDEF_FLAG_IMPASSABLE ==
+                        wad::LINEDEF_FLAG_IMPASSABLE
+                    {
                         wall.push(mime::Vertex::new(start.x, sector.floor_height, start.y, color));
                         wall.push(mime::Vertex::new(end.x, sector.floor_height, end.y, color));
                         wall.push(mime::Vertex::new(end.x, sector.ceiling_height, end.y, color));
                         wall.push(mime::Vertex::new(start.x, sector.ceiling_height, start.y, color));
                     }
 
-                    add_vertices(wall, false);
+                    add_vertices(wall, false, false);
                 }
             }
 
@@ -123,13 +128,80 @@ fn load_wad_map_data() -> wad::Map {
                 index = 0;
             }
 
-            add_vertices(floor, true);
-            add_vertices(ceiling, false);
+            add_vertices(floor, true, true);
+            add_vertices(ceiling, false, true);
         }
     }
 
     // TODO(patrik): Find lines with multiple sectors
     // Generate the vertices if those sectors has diffrent hights
+
+    // TODO(patrik): With this we generate the same walls for different segments
+    // because the don't check if we already have generate the wall
+
+    //let sector = &map.sectors[38];
+    for sector in &map.sectors {
+        for sub_sector in &sector.sub_sectors {
+            for segment in 0..sub_sector.count {
+                let segment = map.segments[sub_sector.start + segment];
+
+                if segment.linedef != 0xffff {
+                    let linedef = map.linedefs[segment.linedef];
+                    let line = linedef.line;
+
+                    let start = map.vertex(line.start_vertex);
+                    let end = map.vertex(line.end_vertex);
+
+                    if linedef.front_sidedef.is_some() && linedef.back_sidedef.is_some() {
+                        let front_sidedef = linedef.front_sidedef.unwrap();
+                        let front_sidedef = map.sidedefs[front_sidedef];
+
+                        let back_sidedef = linedef.back_sidedef.unwrap();
+                        let back_sidedef = map.sidedefs[back_sidedef];
+
+                        let front_sector = &map.sectors[front_sidedef.sector];
+                        let back_sector = &map.sectors[back_sidedef.sector];
+
+                        // Generate the floor difference
+                        if front_sector.floor_height != back_sector.floor_height {
+                            // TODO(patrik): Generate the vertices
+
+                            let front = front_sector.floor_height;
+                            let back = back_sector.floor_height;
+
+                            let mut verts = Vec::new();
+
+                            let color = [1.0, 0.0, 1.0, 1.0];
+                            verts.push(mime::Vertex::new(start.x, front, start.y, color));
+                            verts.push(mime::Vertex::new(end.x, front, end.y, color));
+                            verts.push(mime::Vertex::new(end.x, back, end.y, color));
+                            verts.push(mime::Vertex::new(start.x, back, start.y, color));
+
+                            add_vertices(verts, false, false);
+                        }
+
+                        // Generate the height difference
+                        if front_sector.ceiling_height != back_sector.ceiling_height {
+                            // TODO(patrik): Generate the vertices
+
+                            let front = front_sector.ceiling_height;
+                            let back = back_sector.ceiling_height;
+
+                            let mut verts = Vec::new();
+
+                            let color = [1.0, 0.0, 1.0, 1.0];
+                            verts.push(mime::Vertex::new(start.x, front, start.y, color));
+                            verts.push(mime::Vertex::new(end.x, front, end.y, color));
+                            verts.push(mime::Vertex::new(end.x, back, end.y, color));
+                            verts.push(mime::Vertex::new(start.x, back, start.y, color));
+
+                            add_vertices(verts, true, false);
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     let mime_map = mime::Map::new(vertices, indices);
     mime_map.save_to_file("map.mup").unwrap();
