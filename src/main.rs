@@ -110,8 +110,7 @@ fn load_wad_map_data() -> wad::Map {
                     let start = map.vertex(line.start_vertex);
                     let end = map.vertex(line.end_vertex);
 
-                    if linedef.flags & wad::LINEDEF_FLAG_IMPASSABLE ==
-                        wad::LINEDEF_FLAG_IMPASSABLE
+                    if linedef.flags & wad::LINEDEF_FLAG_IMPASSABLE == wad::LINEDEF_FLAG_IMPASSABLE && linedef.flags & wad::LINEDEF_FLAG_TWO_SIDED != wad::LINEDEF_FLAG_TWO_SIDED
                     {
                         wall.push(mime::Vertex::new(start.x, sector.floor_height, start.y, color));
                         wall.push(mime::Vertex::new(end.x, sector.floor_height, end.y, color));
@@ -138,6 +137,8 @@ fn load_wad_map_data() -> wad::Map {
 
     // TODO(patrik): With this we generate the same walls for different segments
     // because the don't check if we already have generate the wall
+
+    let mut index = 0;
 
     //let sector = &map.sectors[38];
     for sector in &map.sectors {
@@ -171,13 +172,17 @@ fn load_wad_map_data() -> wad::Map {
 
                             let mut verts = Vec::new();
 
-                            let color = [1.0, 0.0, 1.0, 1.0];
+                            let color = COLOR_TABLE[index]; //[1.0, 0.0, 1.0, 1.0];
                             verts.push(mime::Vertex::new(start.x, front, start.y, color));
                             verts.push(mime::Vertex::new(end.x, front, end.y, color));
                             verts.push(mime::Vertex::new(end.x, back, end.y, color));
                             verts.push(mime::Vertex::new(start.x, back, start.y, color));
 
                             add_vertices(verts, false, false);
+                            index += 1;
+                            if index >= COLOR_TABLE.len() {
+                                index = 0;
+                            }
                         }
 
                         // Generate the height difference
@@ -189,13 +194,18 @@ fn load_wad_map_data() -> wad::Map {
 
                             let mut verts = Vec::new();
 
-                            let color = [1.0, 0.0, 1.0, 1.0];
+                            let color = COLOR_TABLE[index]; // [1.0, 0.0, 1.0, 1.0];
                             verts.push(mime::Vertex::new(start.x, front, start.y, color));
                             verts.push(mime::Vertex::new(end.x, front, end.y, color));
                             verts.push(mime::Vertex::new(end.x, back, end.y, color));
                             verts.push(mime::Vertex::new(start.x, back, start.y, color));
 
                             add_vertices(verts, true, false);
+
+                            index += 1;
+                            if index >= COLOR_TABLE.len() {
+                                index = 0;
+                            }
                         }
                     }
                 }
@@ -319,7 +329,7 @@ impl App {
             };
     */
 
-        let sector = &self.map.sectors[38]; {
+        let sector = &self.map.sectors[39]; {
             //let sub_sector = sector.sub_sectors[1]; {
             for sub_sector in &sector.sub_sectors {
                 //let segment = 0; {
@@ -328,9 +338,7 @@ impl App {
 
                     if segment.linedef != 0xffff {
                         let linedef = self.map.linedefs[segment.linedef];
-                        if linedef.flags & wad::LINEDEF_FLAG_IMPASSABLE == wad::LINEDEF_FLAG_IMPASSABLE {
-                            draw_line(linedef.line, 1.0, [1.0, 0.0, 1.0, 1.0]);
-                        }
+                        draw_line(linedef.line, 1.0, [1.0, 0.0, 1.0, 1.0]);
                     }
                 }
             }

@@ -1,6 +1,7 @@
 //! Module to handle WAD files
 
 pub const LINEDEF_FLAG_IMPASSABLE: usize = 0x0001;
+pub const LINEDEF_FLAG_TWO_SIDED: usize = 0x0004;
 
 #[derive(Copy, Clone, Debug)]
 pub enum Error {
