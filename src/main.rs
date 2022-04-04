@@ -155,7 +155,30 @@ fn generate_sector_extra(map: &wad::Map, sector: &wad::Sector,
                 let start = map.vertex(line.start_vertex);
                 let end = map.vertex(line.end_vertex);
 
-                if linedef.front_sidedef.is_some() && linedef.back_sidedef.is_some() {
+                let mut generate_wall = |front, back, clockwise| {
+                    let mut verts = Vec::new();
+
+                    let color = COLOR_TABLE[index];
+                    verts.push(
+                        mime::Vertex::new(start.x, front, start.y, color));
+                    verts.push(
+                        mime::Vertex::new(end.x, front, end.y, color));
+                    verts.push(
+                        mime::Vertex::new(end.x, back, end.y, color));
+                    verts.push(
+                        mime::Vertex::new(start.x, back, start.y, color));
+
+                    mesh.add_vertices(verts, clockwise, false);
+
+                    index += 1;
+                    if index >= COLOR_TABLE.len() {
+                        index = 0;
+                    }
+                };
+
+                if linedef.front_sidedef.is_some() &&
+                    linedef.back_sidedef.is_some()
+                {
                     let front_sidedef = linedef.front_sidedef.unwrap();
                     let front_sidedef = map.sidedefs[front_sidedef];
 
@@ -167,48 +190,17 @@ fn generate_sector_extra(map: &wad::Map, sector: &wad::Sector,
 
                     // Generate the floor difference
                     if front_sector.floor_height != back_sector.floor_height {
-                        // TODO(patrik): Generate the vertices
-
                         let front = front_sector.floor_height;
                         let back = back_sector.floor_height;
 
-                        let mut verts = Vec::new();
-
-                        let color = COLOR_TABLE[index]; //[1.0, 0.0, 1.0, 1.0];
-                        verts.push(mime::Vertex::new(start.x, front, start.y, color));
-                        verts.push(mime::Vertex::new(end.x, front, end.y, color));
-                        verts.push(mime::Vertex::new(end.x, back, end.y, color));
-                        verts.push(mime::Vertex::new(start.x, back, start.y, color));
-
-                        mesh.add_vertices(verts, false, false);
-
-                        index += 1;
-                        if index >= COLOR_TABLE.len() {
-                            index = 0;
-                        }
+                        generate_wall(front, back, false);
                     }
 
                     // Generate the height difference
                     if front_sector.ceiling_height != back_sector.ceiling_height {
-                        // TODO(patrik): Generate the vertices
-
                         let front = front_sector.ceiling_height;
                         let back = back_sector.ceiling_height;
-
-                        let mut verts = Vec::new();
-
-                        let color = COLOR_TABLE[index]; // [1.0, 0.0, 1.0, 1.0];
-                        verts.push(mime::Vertex::new(start.x, front, start.y, color));
-                        verts.push(mime::Vertex::new(end.x, front, end.y, color));
-                        verts.push(mime::Vertex::new(end.x, back, end.y, color));
-                        verts.push(mime::Vertex::new(start.x, back, start.y, color));
-
-                        mesh.add_vertices(verts, true, false);
-
-                        index += 1;
-                        if index >= COLOR_TABLE.len() {
-                            index = 0;
-                        }
+                        generate_wall(front, back, true);
                     }
                 }
             }
