@@ -1,6 +1,8 @@
-use std::path::Path;
+use std::path::{ Path, PathBuf };
 use std::fs::File;
 use std::io::Read;
+
+use clap::Parser;
 
 use wad::Wad;
 
@@ -10,8 +12,6 @@ mod util;
 /// TODO(patrik):
 ///   - Parse texture data
 ///   - Map format
-///     - Seperate vertex and index buffers for the different sectors
-///       of the map
 ///     - Textures
 
 static COLOR_TABLE: [[f32; 4]; 10] = [
@@ -236,14 +236,50 @@ fn generate_3d_map(wad: &wad::Wad, map_name: &str) -> mime::Map {
     mime::Map::new(sectors)
 }
 
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+    /// The WAD file to convert
+    wad_file: String,
+
+    /// Write output file to <OUTPUT>
+    #[clap(short, long)]
+    output: Option<String>,
+
+    /// Which map to convert (example E1M1)
+    #[clap(short, long)]
+    map: Option<String>,
+}
+
 fn main() {
+    let args = Args::parse();
+    println!("Args: {:?}", args);
+
+    let output = if let Some(output) = args.output {
+        PathBuf::from(output)
+    } else {
+        let mut path = PathBuf::from(args.wad_file.clone());
+        path.set_extension("mup");
+        path
+    };
+
     // Read the raw wad file
-    let data = read_file("doom1.wad");
+    let data = read_file(args.wad_file);
     // Parse the wad
     let wad = Wad::parse(&data)
         .expect("Failed to parse WAD file");
 
-    let map = generate_3d_map(&wad, "E1M1");
-    map.save_to_file("map.mup")
+    let map = if let Some(map) = args.map.as_ref() {
+        map.as_str()
+    } else {
+        // TODO(patrik): If args.map is none then we should convert all
+        // the maps
+        "E1M1"
+    };
+
+    println!("Converting '{}' to mime map", map);
+
+    let map = generate_3d_map(&wad, map);
+    map.save_to_file(output)
         .expect("Failed to save the generated map to the file");
 }
