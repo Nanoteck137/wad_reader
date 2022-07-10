@@ -1,6 +1,7 @@
 use std::path::{ Path, PathBuf };
 use std::fs::File;
 use std::io::Read;
+use std::io::BufWriter;
 
 use clap::Parser;
 
@@ -405,6 +406,13 @@ struct Args {
     map: Option<String>,
 }
 
+#[derive(Copy, Clone, Default, Debug)]
+struct PaletteColor {
+    r: u8,
+    g: u8,
+    b: u8
+}
+
 fn main() {
     let args = Args::parse();
     println!("Args: {:?}", args);
@@ -422,6 +430,57 @@ fn main() {
     // Parse the wad
     let wad = Wad::parse(&data)
         .expect("Failed to parse WAD file");
+
+    if let Ok(index) = wad.find_dir("PLAYPAL") {
+        let playpal = wad.read_dir(index)
+            .expect("Failed to get PLAYPAL data");
+        // One palette entry (R, G, B) 3 bytes
+        let num_colors = playpal.len() / 3;
+        // 256 palette entries per palette
+        let palette_count = num_colors / 256;
+        println!("Palette Count: {}", palette_count);
+
+        std::fs::create_dir_all("test")
+            .expect("Failed to create 'test' folder");
+
+        for palette in 0..palette_count {
+            println!("Writing palette #{}", palette);
+            let mut colors = [PaletteColor::default(); 256];
+
+            let data_start = palette * (256 * 3);
+            for color_index in 0..256 {
+                let start = color_index * 3 + data_start;
+                let r = playpal[start + 0];
+                let g = playpal[start + 1];
+                let b = playpal[start + 2];
+                colors[color_index] = PaletteColor { r, g, b };
+                // println!("Byte Offset: {}, ({}, {}, {})", data_start, r, g, b);
+            }
+
+            let path = format!("test/{}_pal.png", palette);
+            let path = Path::new(&path);
+            let file = File::create(path).unwrap();
+            let ref mut w = BufWriter::new(file);
+            let mut encoder = png::Encoder::new(w, 16, 16);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+
+            let mut pixels = Vec::new();
+            for x in 0..16 {
+                for y in 0..16 {
+                    let index = x + y * 16;
+                    let color = colors[index];
+                    pixels.push(color.r);
+                    pixels.push(color.g);
+                    pixels.push(color.b);
+                    pixels.push(0xffu8);
+                }
+            }
+
+            writer.write_image_data(&pixels).unwrap();
+        }
+    }
 
     let map = if let Some(map) = args.map.as_ref() {
         map.as_str()

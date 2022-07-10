@@ -9,4 +9,5 @@ edition = "2021"
 [dependencies]
 clap = { version = "3.1.8", features = ["derive"] }
 mime = { git = "https://github.com/nanoteck137/mime" }
+png = "0.17.5"
 
