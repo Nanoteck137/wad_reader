@@ -1,6 +1,6 @@
 [package]
 name = "wad_reader"
-author = "Nanoteck137"
+authors = ["Nanoteck137 <patrik.millvik@gmail.com>"]
 version = "0.1.0"
 edition = "2021"
 
