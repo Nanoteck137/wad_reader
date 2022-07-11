@@ -196,15 +196,26 @@ pub struct Sector {
     pub floor_height: f32,
     pub ceiling_height: f32,
 
+    pub floor_texture_name: [u8; 8],
+    pub ceiling_texture_name: [u8; 8],
+
     pub lines: Vec<Linedef>,
     pub sub_sectors: Vec<SubSector>,
 }
 
 impl Sector {
-    fn new(floor_height: f32, ceiling_height: f32) -> Self {
+    fn new(floor_height: f32,
+           ceiling_height: f32,
+           floor_texture_name: [u8; 8],
+           ceiling_texture_name: [u8; 8])
+        -> Self
+    {
         Self {
             floor_height,
             ceiling_height,
+
+            floor_texture_name,
+            ceiling_texture_name,
 
             lines: Vec::new(),
             sub_sectors: Vec::new(),
@@ -453,7 +464,15 @@ impl Map {
                 ceiling_height.try_into()
                     .map_err(|_| Error::ConvertToF32Failed)?;
 
-            self.sectors.push(Sector::new(floor_height, ceiling_height));
+            let floor_texture_name: [u8; 8] = data[4..12].try_into()
+                .map_err(|_| Error::ArrayConvertionFailed)?;
+            let ceiling_texture_name: [u8; 8] = data[12..20].try_into()
+                .map_err(|_| Error::ArrayConvertionFailed)?;
+
+            self.sectors.push(Sector::new(floor_height,
+                                          ceiling_height,
+                                          floor_texture_name,
+                                          ceiling_texture_name));
         }
 
         Ok(())

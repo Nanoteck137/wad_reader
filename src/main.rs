@@ -431,6 +431,7 @@ fn main() {
     let wad = Wad::parse(&data)
         .expect("Failed to parse WAD file");
 
+    let mut final_palette = None;
     if let Ok(index) = wad.find_dir("PLAYPAL") {
         let playpal = wad.read_dir(index)
             .expect("Failed to get PLAYPAL data");
@@ -479,7 +480,183 @@ fn main() {
             }
 
             writer.write_image_data(&pixels).unwrap();
+
+            if palette == 0 {
+                final_palette = Some(colors);
+            }
         }
+    }
+
+    let mut final_color_maps = None;
+    if let Ok(index) = wad.find_dir("COLORMAP") {
+        let color_map_table = wad.read_dir(index)
+            .expect("Failed to get COLORMAP data");
+
+        let num_color_maps = 34;
+
+        let mut color_maps = [[0usize; 256]; 34];
+
+        let mut pixels = Vec::new();
+        for color_map_index in 0..num_color_maps {
+            let data_start = color_map_index * 256;
+            let mut color_map = [0usize; 256];
+            for index in 0..256 {
+                let start = index + data_start;
+                let palette_index = color_map_table[start] as usize;
+                color_map[index] = palette_index;
+
+                let color = final_palette.unwrap()[palette_index];
+                if color_map_index == 0 {
+                    pixels.push(0xffu8);
+                    pixels.push(0x00u8);
+                    pixels.push(0xffu8);
+                    pixels.push(0xffu8);
+                } else {
+                    pixels.push(color.r);
+                    pixels.push(color.g);
+                    pixels.push(color.b);
+                    pixels.push(0xffu8);
+                }
+            }
+
+            color_maps[color_map_index] = color_map;
+        }
+
+        let path = format!("test/colormap.png");
+        let path = Path::new(&path);
+        let file = File::create(path).unwrap();
+        let ref mut w = BufWriter::new(file);
+        let mut encoder = png::Encoder::new(w, 256, 34);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&pixels).unwrap();
+
+        final_color_maps = Some(color_maps);
+    }
+
+    // FLOOR4_8 (flat) NEEDS TO BE ROTATED
+    if let Ok(index) = wad.find_dir("FLOOR4_8") {
+        const TEXTURE_WIDTH: usize = 64;
+        const TEXTURE_HEIGHT: usize = 64;
+
+        let texture_data = wad.read_dir(index)
+            .expect("Failed to get FLOOR4_8 data");
+
+        let mut pixels = [0u8; TEXTURE_WIDTH * TEXTURE_HEIGHT * 4];
+
+        for x in 0..TEXTURE_WIDTH {
+            for y in 0..TEXTURE_HEIGHT {
+                let start = x + y * TEXTURE_WIDTH;
+                let index = texture_data[start];
+
+                let color_map = final_color_maps.unwrap()[0];
+                let palette_index = color_map[index as usize];
+
+                let color = final_palette.unwrap()[palette_index];
+
+                let img_index = x + y * TEXTURE_WIDTH;
+                pixels[img_index * 4 + 0] = color.r;
+                pixels[img_index * 4 + 1] = color.g;
+                pixels[img_index * 4 + 2] = color.b;
+                pixels[img_index * 4 + 3] = 0xffu8;
+            }
+        }
+
+        let path = format!("test/FLOOR4_8.png");
+        let path = Path::new(&path);
+        let file = File::create(path).unwrap();
+        let ref mut w = BufWriter::new(file);
+        let mut encoder = png::Encoder::new(w, TEXTURE_WIDTH as u32, TEXTURE_HEIGHT as u32);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&pixels).unwrap();
+    }
+
+    // TITLEPIC (PATCH FORMAT)
+    if let Ok(index) = wad.find_dir("TITLEPIC") {
+        let texture_data = wad.read_dir(index)
+            .expect("Failed to get TITLEPIC data");
+
+        let width = u16::from_le_bytes(texture_data[0..2].try_into().unwrap());
+        let height = u16::from_le_bytes(texture_data[2..4].try_into().unwrap());
+        let left_offset = i16::from_le_bytes(texture_data[4..6].try_into().unwrap());
+        let top_offset = i16::from_le_bytes(texture_data[6..8].try_into().unwrap());
+        println!("Width: {} Height: {}", width, height);
+        println!("Left: {} Top: {}", left_offset, top_offset);
+        println!("Texture Data Length: {:#x}", texture_data.len());
+
+        let mut pixels = vec![0u8; width as usize * height as usize * 4];
+        let color_map = final_color_maps.unwrap()[0];
+
+        for x in 0..(width as usize) {
+            let start = 8 + x * 4;
+            let offset = u32::from_le_bytes(texture_data[start..start + 4].try_into().unwrap());
+            let offset = offset as usize;
+            // println!("Offset: {:#x}", offset);
+
+            let mut new_offset = offset;
+            let mut y_offset = 0;
+            loop {
+                let topdelta = texture_data[new_offset];
+                if topdelta == 0xff {
+                    break;
+                }
+
+                let length = texture_data[new_offset + 1];
+                println!("{:#x}: Top: {} Length: {}", new_offset, topdelta, length);
+
+                let start = new_offset + 2;
+                for data_offset in 0..(length as usize) {
+                    let index = texture_data[start + data_offset];
+                    let palette_index = color_map[index as usize];
+
+                    let color = final_palette.unwrap()[palette_index];
+
+                    let y = y_offset;
+                    let img_index = x + y * width as usize;
+                    pixels[img_index * 4 + 0] = color.r;
+                    pixels[img_index * 4 + 1] = color.g;
+                    pixels[img_index * 4 + 2] = color.b;
+                    pixels[img_index * 4 + 3] = 0xffu8;
+
+                    y_offset += 1;
+                }
+
+                new_offset += length as usize + 4;
+            }
+        }
+
+        /*
+        for x in 0..TEXTURE_WIDTH {
+            for y in 0..TEXTURE_HEIGHT {
+                let start = x + y * TEXTURE_WIDTH;
+                let index = texture_data[start];
+
+                let color_map = final_color_maps.unwrap()[0];
+                let palette_index = color_map[index as usize];
+
+                let color = final_palette.unwrap()[palette_index];
+
+                let img_index = x + y * TEXTURE_WIDTH;
+                pixels[img_index * 4 + 0] = color.r;
+                pixels[img_index * 4 + 1] = color.g;
+                pixels[img_index * 4 + 2] = color.b;
+                pixels[img_index * 4 + 3] = 0xffu8;
+            }
+        }
+        */
+
+        let path = format!("test/TITLEPIC.png");
+        let path = Path::new(&path);
+        let file = File::create(path).unwrap();
+        let ref mut w = BufWriter::new(file);
+        let mut encoder = png::Encoder::new(w, width as u32, height as u32);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&pixels).unwrap();
     }
 
     let map = if let Some(map) = args.map.as_ref() {
