@@ -361,12 +361,6 @@ fn generate_sector_from_wad(map: &wad::Map,
                             sector: &wad::Sector)
     -> mime::Sector
 {
-    let mut mesh = Mesh::new();
-
-    // let floor_mesh = generate_sector_floor_ceiling(map, sector);
-    // generate_sector_walls(map, sector, &mut mesh);
-    // generate_sector_extra(map, sector, &mut mesh);
-    //
     let floor_mesh = generate_sector_floor(map, sector);
     let ceiling_mesh = generate_sector_ceiling(map, sector);
     let wall_mesh = generate_sector_wall(map, sector);
@@ -604,7 +598,7 @@ fn read_patch_texture(wad: &Wad, name: &str,
                     y_offset += 1;
                 }
 
-                new_offset += length as usize + 4;
+                new_offset += length + 4;
             }
         }
 
@@ -657,11 +651,11 @@ fn main() {
 
     let palettes = read_all_palettes(&wad)
         .expect("Failed to read palettes");
-    let mut final_palette = &palettes[0];
+    let final_palette = &palettes[0];
 
     let color_maps = read_all_color_maps(&wad)
         .expect("Failed to read color maps");
-    let mut final_color_map = &color_maps[0];
+    let final_color_map = &color_maps[0];
 
     // FLOOR4_8 (flat)
     let texture = read_flat_texture(&wad, "FLOOR4_8", final_color_map, final_palette)
