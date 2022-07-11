@@ -416,6 +416,9 @@ struct PaletteColor {
 const MAX_PALETTE_COLORS: usize = 256;
 const MAX_COLOR_MAPS: usize = 34;
 
+const FLAT_TEXTURE_WIDTH: usize = 64;
+const FLAT_TEXTURE_HEIGHT: usize = 64;
+
 struct Palette {
     colors: [PaletteColor; MAX_PALETTE_COLORS],
 }
@@ -500,6 +503,137 @@ fn read_all_color_maps(wad: &Wad) -> Option<Vec<ColorMap>> {
     None
 }
 
+struct Texture {
+    width: usize,
+    height: usize,
+    pixels: Vec<u8>,
+}
+
+fn read_flat_texture(wad: &Wad, name: &str,
+                     color_map: &ColorMap, palette: &Palette)
+    -> Option<Texture>
+{
+    if let Ok(index) = wad.find_dir(name) {
+
+        let texture_data = wad.read_dir(index).ok()?;
+
+        let mut pixels = vec![0u8; FLAT_TEXTURE_WIDTH * FLAT_TEXTURE_HEIGHT * 4];
+
+        for x in 0..FLAT_TEXTURE_WIDTH {
+            for y in 0..FLAT_TEXTURE_HEIGHT {
+                let start = x + y * FLAT_TEXTURE_WIDTH;
+                let index = texture_data[start];
+                let index = index as usize;
+
+                let color =
+                    color_map.get_color_from_palette(palette, index);
+
+                let img_index = x + y * FLAT_TEXTURE_WIDTH;
+                pixels[img_index * 4 + 0] = color.r;
+                pixels[img_index * 4 + 1] = color.g;
+                pixels[img_index * 4 + 2] = color.b;
+                pixels[img_index * 4 + 3] = 0xffu8;
+            }
+        }
+
+        return Some(Texture {
+            width: FLAT_TEXTURE_WIDTH,
+            height: FLAT_TEXTURE_HEIGHT,
+            pixels,
+        });
+    }
+
+    None
+}
+
+fn read_patch_texture(wad: &Wad, name: &str,
+                      color_map: &ColorMap, palette: &Palette)
+    -> Option<Texture>
+{
+    if let Ok(index) = wad.find_dir(name) {
+        let texture_data = wad.read_dir(index).ok()?;
+
+        let width = u16::from_le_bytes(texture_data[0..2].try_into().unwrap());
+        let height = u16::from_le_bytes(texture_data[2..4].try_into().unwrap());
+
+        // TODO(patrik): Should we use these
+        let left_offset = i16::from_le_bytes(texture_data[4..6].try_into().unwrap());
+        let top_offset = i16::from_le_bytes(texture_data[6..8].try_into().unwrap());
+
+        assert!(left_offset == 0 && top_offset == 0);
+
+        let width = width as usize;
+        let height = height as usize;
+
+        let mut pixels = vec![0u8; width * height * 4];
+
+        let start_offset = 8;
+        for x in 0..width {
+            let start = x * 4 + start_offset;
+            let offset = u32::from_le_bytes(texture_data[start..start + 4].try_into().unwrap());
+            let offset = offset as usize;
+
+            let mut new_offset = offset;
+            let mut y_offset = 0;
+            loop {
+                // TODO(patrik): Should we use topdelta to correct the offset
+                // inside the pixel buffer
+                let topdelta = texture_data[new_offset];
+                if topdelta == 0xff {
+                    break;
+                }
+
+                let length = texture_data[new_offset + 1];
+                let length = length as usize;
+
+                let start = new_offset + 2;
+                for data_offset in 0..length {
+                    let index = texture_data[start + data_offset];
+                    let index = index as usize;
+
+                    let color =
+                        color_map.get_color_from_palette(palette, index);
+
+                    let y = y_offset;
+                    let img_index = x + y * width;
+                    pixels[img_index * 4 + 0] = color.r;
+                    pixels[img_index * 4 + 1] = color.g;
+                    pixels[img_index * 4 + 2] = color.b;
+                    pixels[img_index * 4 + 3] = 0xffu8;
+
+                    y_offset += 1;
+                }
+
+                new_offset += length as usize + 4;
+            }
+        }
+
+        return Some(Texture {
+            width,
+            height,
+            pixels,
+        });
+    }
+
+    None
+}
+
+fn write_texture_to_png<P>(path: P, texture: &Texture)
+    where P: AsRef<Path>
+{
+    let file = File::create(path).unwrap();
+    let ref mut file_writer = BufWriter::new(file);
+
+    let mut encoder = png::Encoder::new(file_writer,
+                                        texture.width as u32,
+                                        texture.height as u32);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+
+    let mut writer = encoder.write_header().unwrap();
+    writer.write_image_data(&texture.pixels).unwrap();
+}
+
 fn main() {
     let args = Args::parse();
     println!("Args: {:?}", args);
@@ -530,112 +664,16 @@ fn main() {
     let mut final_color_map = &color_maps[0];
 
     // FLOOR4_8 (flat)
-    if let Ok(index) = wad.find_dir("FLOOR4_8") {
-        const TEXTURE_WIDTH: usize = 64;
-        const TEXTURE_HEIGHT: usize = 64;
-
-        let texture_data = wad.read_dir(index)
-            .expect("Failed to get FLOOR4_8 data");
-
-        let mut pixels = [0u8; TEXTURE_WIDTH * TEXTURE_HEIGHT * 4];
-
-        for x in 0..TEXTURE_WIDTH {
-            for y in 0..TEXTURE_HEIGHT {
-                let start = x + y * TEXTURE_WIDTH;
-                let index = texture_data[start];
-
-                let color =
-                    final_color_map.get_color_from_palette(final_palette,
-                                                           index as usize);
-
-                let img_index = x + y * TEXTURE_WIDTH;
-                pixels[img_index * 4 + 0] = color.r;
-                pixels[img_index * 4 + 1] = color.g;
-                pixels[img_index * 4 + 2] = color.b;
-                pixels[img_index * 4 + 3] = 0xffu8;
-            }
-        }
-
-        let path = format!("test/FLOOR4_8.png");
-        let path = Path::new(&path);
-        let file = File::create(path).unwrap();
-        let ref mut w = BufWriter::new(file);
-        let mut encoder = png::Encoder::new(w, TEXTURE_WIDTH as u32, TEXTURE_HEIGHT as u32);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder.write_header().unwrap();
-        writer.write_image_data(&pixels).unwrap();
-    }
-
-    // let pixels = ;
-    // read_pixels_from_flat();
-    // read_pixels_from_patch();
-    // write_pixels_to_png();
+    let texture = read_flat_texture(&wad, "FLOOR4_8", final_color_map, final_palette)
+        .expect("Failed to read FLOOR4_8");
+    let path = format!("test/FLOOR4_8.png");
+    write_texture_to_png(&path, &texture);
 
     // TITLEPIC (PATCH FORMAT)
-    if let Ok(index) = wad.find_dir("TITLEPIC") {
-        let texture_data = wad.read_dir(index)
-            .expect("Failed to get TITLEPIC data");
-
-        let width = u16::from_le_bytes(texture_data[0..2].try_into().unwrap());
-        let height = u16::from_le_bytes(texture_data[2..4].try_into().unwrap());
-        let left_offset = i16::from_le_bytes(texture_data[4..6].try_into().unwrap());
-        let top_offset = i16::from_le_bytes(texture_data[6..8].try_into().unwrap());
-        println!("Width: {} Height: {}", width, height);
-        println!("Left: {} Top: {}", left_offset, top_offset);
-        println!("Texture Data Length: {:#x}", texture_data.len());
-
-        let mut pixels = vec![0u8; width as usize * height as usize * 4];
-
-        for x in 0..(width as usize) {
-            let start = 8 + x * 4;
-            let offset = u32::from_le_bytes(texture_data[start..start + 4].try_into().unwrap());
-            let offset = offset as usize;
-            // println!("Offset: {:#x}", offset);
-
-            let mut new_offset = offset;
-            let mut y_offset = 0;
-            loop {
-                let topdelta = texture_data[new_offset];
-                if topdelta == 0xff {
-                    break;
-                }
-
-                let length = texture_data[new_offset + 1];
-                println!("{:#x}: Top: {} Length: {}", new_offset, topdelta, length);
-
-                let start = new_offset + 2;
-                for data_offset in 0..(length as usize) {
-                    let index = texture_data[start + data_offset];
-
-                    let color =
-                        final_color_map.get_color_from_palette(final_palette,
-                                                               index as usize);
-
-                    let y = y_offset;
-                    let img_index = x + y * width as usize;
-                    pixels[img_index * 4 + 0] = color.r;
-                    pixels[img_index * 4 + 1] = color.g;
-                    pixels[img_index * 4 + 2] = color.b;
-                    pixels[img_index * 4 + 3] = 0xffu8;
-
-                    y_offset += 1;
-                }
-
-                new_offset += length as usize + 4;
-            }
-        }
-
-        let path = format!("test/TITLEPIC.png");
-        let path = Path::new(&path);
-        let file = File::create(path).unwrap();
-        let ref mut w = BufWriter::new(file);
-        let mut encoder = png::Encoder::new(w, width as u32, height as u32);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder.write_header().unwrap();
-        writer.write_image_data(&pixels).unwrap();
-    }
+    let texture = read_patch_texture(&wad, "TITLEPIC", final_color_map, final_palette)
+        .expect("Failed to read TITLEPIC");
+    let path = format!("test/TITLEPIC.png");
+    write_texture_to_png(&path, &texture);
 
     let map = if let Some(map) = args.map.as_ref() {
         map.as_str()
