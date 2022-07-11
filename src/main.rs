@@ -413,6 +413,93 @@ struct PaletteColor {
     b: u8
 }
 
+const MAX_PALETTE_COLORS: usize = 256;
+const MAX_COLOR_MAPS: usize = 34;
+
+struct Palette {
+    colors: [PaletteColor; MAX_PALETTE_COLORS],
+}
+
+impl Palette {
+    fn get(&self, index: usize) -> PaletteColor {
+        self.colors[index]
+    }
+}
+
+struct ColorMap {
+    map: [usize; MAX_PALETTE_COLORS]
+}
+
+impl ColorMap {
+    fn get(&self, index: usize) -> usize {
+        self.map[index]
+    }
+
+    fn get_color_from_palette(&self, palette: &Palette, index: usize)
+        -> PaletteColor
+    {
+        let palette_index = self.get(index);
+        palette.get(palette_index)
+    }
+}
+
+fn read_all_palettes(wad: &Wad) -> Option<Vec<Palette>> {
+    if let Ok(index) = wad.find_dir("PLAYPAL") {
+        let playpal = wad.read_dir(index)
+            .expect("Failed to get PLAYPAL data");
+        // One palette entry (R, G, B) 3 bytes
+        let num_colors = playpal.len() / 3;
+        // 256 palette entries per palette
+        let palette_count = num_colors / MAX_PALETTE_COLORS;
+
+        let mut palettes = Vec::new();
+
+        for palette in 0..palette_count {
+            let mut colors = [PaletteColor::default(); MAX_PALETTE_COLORS];
+
+            let data_start = palette * (256 * 3);
+            for color_index in 0..256 {
+                let start = color_index * 3 + data_start;
+                let r = playpal[start + 0];
+                let g = playpal[start + 1];
+                let b = playpal[start + 2];
+                colors[color_index] = PaletteColor { r, g, b };
+            }
+
+            palettes.push(Palette { colors });
+        }
+
+        return Some(palettes);
+    }
+
+    None
+}
+
+fn read_all_color_maps(wad: &Wad) -> Option<Vec<ColorMap>> {
+    if let Ok(index) = wad.find_dir("COLORMAP") {
+        let color_map_table = wad.read_dir(index)
+            .expect("Failed to get COLORMAP data");
+
+        let mut color_maps = Vec::with_capacity(MAX_COLOR_MAPS);
+
+        for color_map_index in 0..MAX_COLOR_MAPS {
+            let data_start = color_map_index * MAX_PALETTE_COLORS;
+            let mut color_map = [0usize; MAX_PALETTE_COLORS];
+            for index in 0..MAX_PALETTE_COLORS {
+                let start = index + data_start;
+                let palette_index = color_map_table[start] as usize;
+                color_map[index] = palette_index;
+            }
+
+            color_maps.push(ColorMap { map: color_map });
+        }
+
+        return Some(color_maps);
+    }
+
+    None
+}
+
 fn main() {
     let args = Args::parse();
     println!("Args: {:?}", args);
@@ -431,111 +518,18 @@ fn main() {
     let wad = Wad::parse(&data)
         .expect("Failed to parse WAD file");
 
-    let mut final_palette = None;
-    if let Ok(index) = wad.find_dir("PLAYPAL") {
-        let playpal = wad.read_dir(index)
-            .expect("Failed to get PLAYPAL data");
-        // One palette entry (R, G, B) 3 bytes
-        let num_colors = playpal.len() / 3;
-        // 256 palette entries per palette
-        let palette_count = num_colors / 256;
-        println!("Palette Count: {}", palette_count);
+    std::fs::create_dir_all("test")
+        .expect("Failed to create 'test' folder");
 
-        std::fs::create_dir_all("test")
-            .expect("Failed to create 'test' folder");
+    let palettes = read_all_palettes(&wad)
+        .expect("Failed to read palettes");
+    let mut final_palette = &palettes[0];
 
-        for palette in 0..palette_count {
-            println!("Writing palette #{}", palette);
-            let mut colors = [PaletteColor::default(); 256];
+    let color_maps = read_all_color_maps(&wad)
+        .expect("Failed to read color maps");
+    let mut final_color_map = &color_maps[0];
 
-            let data_start = palette * (256 * 3);
-            for color_index in 0..256 {
-                let start = color_index * 3 + data_start;
-                let r = playpal[start + 0];
-                let g = playpal[start + 1];
-                let b = playpal[start + 2];
-                colors[color_index] = PaletteColor { r, g, b };
-                // println!("Byte Offset: {}, ({}, {}, {})", data_start, r, g, b);
-            }
-
-            let path = format!("test/{}_pal.png", palette);
-            let path = Path::new(&path);
-            let file = File::create(path).unwrap();
-            let ref mut w = BufWriter::new(file);
-            let mut encoder = png::Encoder::new(w, 16, 16);
-            encoder.set_color(png::ColorType::Rgba);
-            encoder.set_depth(png::BitDepth::Eight);
-            let mut writer = encoder.write_header().unwrap();
-
-            let mut pixels = Vec::new();
-            for x in 0..16 {
-                for y in 0..16 {
-                    let index = x + y * 16;
-                    let color = colors[index];
-                    pixels.push(color.r);
-                    pixels.push(color.g);
-                    pixels.push(color.b);
-                    pixels.push(0xffu8);
-                }
-            }
-
-            writer.write_image_data(&pixels).unwrap();
-
-            if palette == 0 {
-                final_palette = Some(colors);
-            }
-        }
-    }
-
-    let mut final_color_maps = None;
-    if let Ok(index) = wad.find_dir("COLORMAP") {
-        let color_map_table = wad.read_dir(index)
-            .expect("Failed to get COLORMAP data");
-
-        let num_color_maps = 34;
-
-        let mut color_maps = [[0usize; 256]; 34];
-
-        let mut pixels = Vec::new();
-        for color_map_index in 0..num_color_maps {
-            let data_start = color_map_index * 256;
-            let mut color_map = [0usize; 256];
-            for index in 0..256 {
-                let start = index + data_start;
-                let palette_index = color_map_table[start] as usize;
-                color_map[index] = palette_index;
-
-                let color = final_palette.unwrap()[palette_index];
-                if color_map_index == 0 {
-                    pixels.push(0xffu8);
-                    pixels.push(0x00u8);
-                    pixels.push(0xffu8);
-                    pixels.push(0xffu8);
-                } else {
-                    pixels.push(color.r);
-                    pixels.push(color.g);
-                    pixels.push(color.b);
-                    pixels.push(0xffu8);
-                }
-            }
-
-            color_maps[color_map_index] = color_map;
-        }
-
-        let path = format!("test/colormap.png");
-        let path = Path::new(&path);
-        let file = File::create(path).unwrap();
-        let ref mut w = BufWriter::new(file);
-        let mut encoder = png::Encoder::new(w, 256, 34);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder.write_header().unwrap();
-        writer.write_image_data(&pixels).unwrap();
-
-        final_color_maps = Some(color_maps);
-    }
-
-    // FLOOR4_8 (flat) NEEDS TO BE ROTATED
+    // FLOOR4_8 (flat)
     if let Ok(index) = wad.find_dir("FLOOR4_8") {
         const TEXTURE_WIDTH: usize = 64;
         const TEXTURE_HEIGHT: usize = 64;
@@ -550,10 +544,9 @@ fn main() {
                 let start = x + y * TEXTURE_WIDTH;
                 let index = texture_data[start];
 
-                let color_map = final_color_maps.unwrap()[0];
-                let palette_index = color_map[index as usize];
-
-                let color = final_palette.unwrap()[palette_index];
+                let color =
+                    final_color_map.get_color_from_palette(final_palette,
+                                                           index as usize);
 
                 let img_index = x + y * TEXTURE_WIDTH;
                 pixels[img_index * 4 + 0] = color.r;
@@ -574,6 +567,11 @@ fn main() {
         writer.write_image_data(&pixels).unwrap();
     }
 
+    // let pixels = ;
+    // read_pixels_from_flat();
+    // read_pixels_from_patch();
+    // write_pixels_to_png();
+
     // TITLEPIC (PATCH FORMAT)
     if let Ok(index) = wad.find_dir("TITLEPIC") {
         let texture_data = wad.read_dir(index)
@@ -588,7 +586,6 @@ fn main() {
         println!("Texture Data Length: {:#x}", texture_data.len());
 
         let mut pixels = vec![0u8; width as usize * height as usize * 4];
-        let color_map = final_color_maps.unwrap()[0];
 
         for x in 0..(width as usize) {
             let start = 8 + x * 4;
@@ -610,9 +607,10 @@ fn main() {
                 let start = new_offset + 2;
                 for data_offset in 0..(length as usize) {
                     let index = texture_data[start + data_offset];
-                    let palette_index = color_map[index as usize];
 
-                    let color = final_palette.unwrap()[palette_index];
+                    let color =
+                        final_color_map.get_color_from_palette(final_palette,
+                                                               index as usize);
 
                     let y = y_offset;
                     let img_index = x + y * width as usize;
@@ -627,26 +625,6 @@ fn main() {
                 new_offset += length as usize + 4;
             }
         }
-
-        /*
-        for x in 0..TEXTURE_WIDTH {
-            for y in 0..TEXTURE_HEIGHT {
-                let start = x + y * TEXTURE_WIDTH;
-                let index = texture_data[start];
-
-                let color_map = final_color_maps.unwrap()[0];
-                let palette_index = color_map[index as usize];
-
-                let color = final_palette.unwrap()[palette_index];
-
-                let img_index = x + y * TEXTURE_WIDTH;
-                pixels[img_index * 4 + 0] = color.r;
-                pixels[img_index * 4 + 1] = color.g;
-                pixels[img_index * 4 + 2] = color.b;
-                pixels[img_index * 4 + 3] = 0xffu8;
-            }
-        }
-        */
 
         let path = format!("test/TITLEPIC.png");
         let path = Path::new(&path);
