@@ -140,7 +140,6 @@ checksum = "349d5a591cd28b49e1d1037471617a32ddcda5731b99419008085f72d5a53836"
 [[package]]
 name = "mime"
 version = "0.1.0"
-source = "git+https://github.com/nanoteck137/mime#750c921badaa76bdfc4319ffaf4ebd4089c1e882"
 
 [[package]]
 name = "miniz_oxide"

@@ -34,7 +34,7 @@ pub fn triangulate(polygon: &Vec<mime::Vertex>, clockwise: bool) -> Vec<u32> {
 }
 
 pub fn line_angle(a: mime::Vertex, b: mime::Vertex) -> f32 {
-    (b.z - a.z).atan2(b.x - a.x)
+    (b.z() - a.z()).atan2(b.x() - a.x())
 }
 
 pub fn point_on_line(a: mime::Vertex, b: mime::Vertex, c: mime::Vertex) -> bool {

@@ -86,8 +86,10 @@ fn generate_sector_floor(map: &wad::Map, sector: &wad::Sector) -> mime::Mesh {
             let segment = map.segments[sub_sector.start + segment];
             let start = map.vertex(segment.start_vertex);
 
+            let pos = [start.x, sector.floor_height, start.y];
+            let uv = [start.x, start.y];
             let color = COLOR_TABLE[index];
-            vertices.push(mime::Vertex::new(start.x, sector.floor_height, start.y, color));
+            vertices.push(mime::Vertex::new(pos, uv, color));
         }
 
         index += 1;
@@ -115,11 +117,10 @@ fn generate_sector_ceiling(map: &wad::Map, sector: &wad::Sector)
             let segment = map.segments[sub_sector.start + segment];
             let start = map.vertex(segment.start_vertex);
 
+            let pos = [start.x, sector.ceiling_height, start.y];
+            let uv = [start.x, start.y];
             let color = COLOR_TABLE[index];
-            vertices.push(mime::Vertex::new(start.x,
-                                            sector.ceiling_height,
-                                            start.y,
-                                            color));
+            vertices.push(mime::Vertex::new(pos, uv, color));
         }
 
         index += 1;
@@ -153,10 +154,19 @@ fn generate_sector_wall(map: &wad::Map, sector: &wad::Sector) -> mime::Mesh {
                 if linedef.flags & wad::LINEDEF_FLAG_IMPASSABLE == wad::LINEDEF_FLAG_IMPASSABLE &&
                     linedef.flags & wad::LINEDEF_FLAG_TWO_SIDED != wad::LINEDEF_FLAG_TWO_SIDED
                 {
-                    wall.push(mime::Vertex::new(start.x, sector.floor_height, start.y, color));
-                    wall.push(mime::Vertex::new(end.x, sector.floor_height, end.y, color));
-                    wall.push(mime::Vertex::new(end.x, sector.ceiling_height, end.y, color));
-                    wall.push(mime::Vertex::new(start.x, sector.ceiling_height, start.y, color));
+                    let uv = [0.0, 0.0];
+
+                    let pos = [start.x, sector.floor_height, start.y];
+                    wall.push(mime::Vertex::new(pos, uv, color));
+
+                    let pos = [end.x, sector.floor_height, end.y];
+                    wall.push(mime::Vertex::new(pos, uv, color));
+
+                    let pos = [end.x, sector.ceiling_height, end.y];
+                    wall.push(mime::Vertex::new(pos, uv, color));
+
+                    let pos = [start.x, sector.ceiling_height, start.y];
+                    wall.push(mime::Vertex::new(pos, uv, color));
                 }
 
                 mesh.add_vertices(wall, false, false);
@@ -165,14 +175,19 @@ fn generate_sector_wall(map: &wad::Map, sector: &wad::Sector) -> mime::Mesh {
                     let mut verts = Vec::new();
 
                     let color = COLOR_TABLE[index];
-                    verts.push(
-                        mime::Vertex::new(start.x, front, start.y, color));
-                    verts.push(
-                        mime::Vertex::new(end.x, front, end.y, color));
-                    verts.push(
-                        mime::Vertex::new(end.x, back, end.y, color));
-                    verts.push(
-                        mime::Vertex::new(start.x, back, start.y, color));
+                    let uv = [0.0, 0.0];
+
+                    let pos = [start.x, front, start.y];
+                    verts.push(mime::Vertex::new(pos, uv, color));
+
+                    let pos = [end.x, front, end.y];
+                    verts.push(mime::Vertex::new(pos, uv, color));
+
+                    let pos = [end.x, back, end.y];
+                    verts.push(mime::Vertex::new(pos, uv, color));
+
+                    let pos = [start.x, back, start.y];
+                    verts.push(mime::Vertex::new(pos, uv, color));
 
                     mesh.add_vertices(verts, clockwise, false);
 
@@ -237,6 +252,11 @@ fn generate_3d_map(wad: &wad::Wad, map_name: &str) -> mime::Map {
         .expect("Failed to load wad map");
 
     let mut sectors = Vec::new();
+
+    /*
+    let map_sector = generate_sector_from_wad(&map, &map.sectors[50]);
+    sectors.push(map_sector);
+    */
 
     for sector in &map.sectors {
         let map_sector = generate_sector_from_wad(&map, sector);
