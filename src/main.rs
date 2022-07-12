@@ -154,18 +154,46 @@ fn generate_sector_wall(map: &wad::Map, sector: &wad::Sector) -> mime::Mesh {
                 if linedef.flags & wad::LINEDEF_FLAG_IMPASSABLE == wad::LINEDEF_FLAG_IMPASSABLE &&
                     linedef.flags & wad::LINEDEF_FLAG_TWO_SIDED != wad::LINEDEF_FLAG_TWO_SIDED
                 {
-                    let uv = [0.0, 0.0];
+                    let dx = (end.x - start.x).abs();
+                    let dy = (end.y - start.y).abs();
+
+                    // Normalize the "vector"
+                    let mag = (dx * dx + dy * dy).sqrt();
+                    let dx = dx / mag;
+                    let dy = dy / mag;
+
+                    // TODO(patrik): We might need to revisit this and change
+                    // the order
+                    let uvs = if dx > dy {
+                        [
+                            [start.x,   sector.floor_height],
+                            [end.x,     sector.floor_height],
+                            [end.x,     sector.ceiling_height],
+                            [start.x,   sector.ceiling_height]
+                        ]
+                    } else {
+                        [
+                            [end.y, sector.floor_height],
+                            [start.y, sector.floor_height],
+                            [start.y, sector.ceiling_height],
+                            [end.y, sector.ceiling_height],
+                        ]
+                    };
 
                     let pos = [start.x, sector.floor_height, start.y];
+                    let uv = uvs[0]; // 3
                     wall.push(mime::Vertex::new(pos, uv, color));
 
                     let pos = [end.x, sector.floor_height, end.y];
+                    let uv = uvs[1]; // 0
                     wall.push(mime::Vertex::new(pos, uv, color));
 
                     let pos = [end.x, sector.ceiling_height, end.y];
+                    let uv = uvs[2]; // 1
                     wall.push(mime::Vertex::new(pos, uv, color));
 
                     let pos = [start.x, sector.ceiling_height, start.y];
+                    let uv = uvs[3]; // 2
                     wall.push(mime::Vertex::new(pos, uv, color));
                 }
 
@@ -175,18 +203,47 @@ fn generate_sector_wall(map: &wad::Map, sector: &wad::Sector) -> mime::Mesh {
                     let mut verts = Vec::new();
 
                     let color = COLOR_TABLE[index];
-                    let uv = [0.0, 0.0];
+
+                    let dx = (end.x - start.x).abs();
+                    let dy = (end.y - start.y).abs();
+
+                    // Normalize the "vector"
+                    let mag = (dx * dx + dy * dy).sqrt();
+                    let dx = dx / mag;
+                    let dy = dy / mag;
+
+                    // TODO(patrik): We might need to revisit this and change
+                    // the order
+                    let uvs = if dx > dy {
+                        [
+                            [start.x, front],
+                            [end.x, front],
+                            [end.x, back],
+                            [start.x, back]
+                        ]
+                    } else {
+                        [
+                            [end.y, front],
+                            [start.y, front],
+                            [start.y, back],
+                            [end.y, back],
+                        ]
+                    };
 
                     let pos = [start.x, front, start.y];
+                    let uv = uvs[0];
                     verts.push(mime::Vertex::new(pos, uv, color));
 
                     let pos = [end.x, front, end.y];
+                    let uv = uvs[1];
                     verts.push(mime::Vertex::new(pos, uv, color));
 
                     let pos = [end.x, back, end.y];
+                    let uv = uvs[2];
                     verts.push(mime::Vertex::new(pos, uv, color));
 
                     let pos = [start.x, back, start.y];
+                    let uv = uvs[3];
                     verts.push(mime::Vertex::new(pos, uv, color));
 
                     mesh.add_vertices(verts, clockwise, false);
