@@ -38,6 +38,100 @@ fn read_file<P>(path: P) -> Vec<u8>
     result
 }
 
+struct TextureLoader {
+    color_map: ColorMap,
+    palette: Palette,
+
+    patch_start: usize,
+    patch_end: usize,
+    flat_start: usize,
+    flat_end: usize,
+}
+
+impl TextureLoader {
+    fn new(wad: &Wad, color_map: ColorMap, palette: Palette)
+        -> Option<Self>
+    {
+        assert!(!wad.find_dir("P3_START").is_ok());
+
+        let patch_start = wad.find_dir("P_START").ok()?;
+        let patch_end = wad.find_dir("P_END").ok()?;
+        assert!(patch_start < patch_end);
+
+        let flat_start = wad.find_dir("F_START").ok()?;
+        let flat_end = wad.find_dir("F_END").ok()?;
+        assert!(flat_start < flat_end);
+
+        Some(Self {
+            color_map,
+            palette,
+
+            patch_start,
+            patch_end,
+            flat_start,
+            flat_end,
+        })
+    }
+
+    fn is_patch(&self, index: usize) -> bool {
+        index > self.patch_start && index < self.patch_end
+    }
+
+    fn is_flat(&self, index: usize) -> bool {
+        index > self.flat_start && index < self.flat_end
+    }
+
+    fn load(&self, wad: &Wad, name: &str) -> Option<Texture> {
+        let dir_index = wad.find_dir(name).ok()?;
+
+        if self.is_patch(dir_index) {
+            println!("{} is patch", name);
+        } else if self.is_flat(dir_index) {
+            println!("{} is flat", name);
+            return read_flat_texture(wad, name, &self.color_map, &self.palette);
+        } else {
+            panic!("{} is not flat or patch", name);
+        }
+
+        None
+    }
+}
+
+struct TextureQueue {
+    textures: Vec<String>,
+}
+
+impl TextureQueue {
+    fn new() -> Self {
+        Self {
+            textures: Vec::new(),
+        }
+    }
+
+    fn get(&self, name: &str) -> Option<usize> {
+        for i in 0..self.textures.len() {
+            if self.textures[i] == name {
+                return Some(i);
+            }
+        }
+
+        return None;
+    }
+
+    fn enqueue(&mut self, name: String) -> usize {
+        println!("Enqueing Texture: {:?}", name);
+        return if let Some(index) = self.get(&name) {
+            index
+        }
+        else {
+            let id = self.textures.len();
+            self.textures.push(name);
+
+            id
+        };
+    }
+}
+
 struct Mesh {
     vertex_buffer: Vec<mime::Vertex>,
     index_buffer: Vec<u32>,
@@ -74,7 +168,11 @@ impl Mesh {
     }
 }
 
-fn generate_sector_floor(map: &wad::Map, sector: &wad::Sector) -> mime::Mesh {
+fn generate_sector_floor(map: &wad::Map,
+                         texture_queue: &mut TextureQueue,
+                         sector: &wad::Sector)
+    -> mime::Mesh
+{
     let mut mesh = Mesh::new();
 
     let mut index = 0;
@@ -100,7 +198,20 @@ fn generate_sector_floor(map: &wad::Map, sector: &wad::Sector) -> mime::Mesh {
         mesh.add_vertices(vertices, true, true);
     }
 
-    mime::Mesh::new(mesh.vertex_buffer, mesh.index_buffer)
+    let texture_name = sector.floor_texture_name;
+    let null_pos = texture_name.iter()
+        .position(|&c| c == 0)
+        .unwrap_or(texture_name.len());
+    let texture_name = &texture_name[..null_pos];
+    let texture_name = std::str::from_utf8(&texture_name)
+            .expect("Failed to convert floor texture name to str");
+    let texture_name = String::from(texture_name);
+
+    let texture_id = texture_queue.enqueue(texture_name);
+
+    mime::Mesh::new(mesh.vertex_buffer,
+                    mesh.index_buffer,
+                    texture_id.try_into().unwrap())
 }
 
 fn generate_sector_ceiling(map: &wad::Map, sector: &wad::Sector)
@@ -131,7 +242,7 @@ fn generate_sector_ceiling(map: &wad::Map, sector: &wad::Sector)
         mesh.add_vertices(vertices, false, true);
     }
 
-    mime::Mesh::new(mesh.vertex_buffer, mesh.index_buffer)
+    mime::Mesh::new(mesh.vertex_buffer, mesh.index_buffer, 0)
 }
 
 fn generate_sector_wall(map: &wad::Map, sector: &wad::Sector) -> mime::Mesh {
@@ -290,20 +401,26 @@ fn generate_sector_wall(map: &wad::Map, sector: &wad::Sector) -> mime::Mesh {
         }
     }
 
-    mime::Mesh::new(mesh.vertex_buffer, mesh.index_buffer)
+    mime::Mesh::new(mesh.vertex_buffer, mesh.index_buffer, 0)
 }
 
-fn generate_sector_from_wad(map: &wad::Map, sector: &wad::Sector)
+fn generate_sector_from_wad(map: &wad::Map,
+                            texture_queue: &mut TextureQueue,
+                            sector: &wad::Sector)
     -> mime::Sector
 {
-    let floor_mesh = generate_sector_floor(map, sector);
+    let floor_mesh = generate_sector_floor(map, texture_queue, sector);
     let ceiling_mesh = generate_sector_ceiling(map, sector);
     let wall_mesh = generate_sector_wall(map, sector);
 
     mime::Sector::new(floor_mesh, ceiling_mesh, wall_mesh)
 }
 
-fn generate_3d_map(wad: &wad::Wad, map_name: &str) -> mime::Map {
+fn generate_3d_map(wad: &wad::Wad,
+                   texture_queue: &mut TextureQueue,
+                   map_name: &str)
+    -> mime::Map
+{
     // Construct an map with map from the wad
     let map = wad::Map::parse_from_wad(&wad, map_name)
         .expect("Failed to load wad map");
@@ -316,7 +433,7 @@ fn generate_3d_map(wad: &wad::Wad, map_name: &str) -> mime::Map {
     */
 
     for sector in &map.sectors {
-        let map_sector = generate_sector_from_wad(&map, sector);
+        let map_sector = generate_sector_from_wad(&map, texture_queue, sector);
         sectors.push(map_sector);
     }
 
@@ -353,6 +470,7 @@ const MAX_COLOR_MAPS: usize = 34;
 const FLAT_TEXTURE_WIDTH: usize = 64;
 const FLAT_TEXTURE_HEIGHT: usize = 64;
 
+#[derive(Clone)]
 struct Palette {
     colors: [PaletteColor; MAX_PALETTE_COLORS],
 }
@@ -363,6 +481,7 @@ impl Palette {
     }
 }
 
+#[derive(Clone)]
 struct ColorMap {
     map: [usize; MAX_PALETTE_COLORS]
 }
@@ -796,6 +915,9 @@ fn main() {
         .expect("Failed to read color maps");
     let final_color_map = &color_maps[0];
 
+    let texture_loader = TextureLoader::new(&wad, final_color_map.clone(), final_palette.clone())
+        .expect("Failed to create TextureLoader");
+
     // FLOOR4_8 (flat)
     let texture = read_flat_texture(&wad, "FLOOR4_8", final_color_map, final_palette)
         .expect("Failed to read FLOOR4_8");
@@ -815,7 +937,7 @@ fn main() {
     // assert!(!wad.find_dir("TEXTURE2").is_ok());
     let texture_defs = read_texture_defs(&wad)
         .expect("Failed to read texture defs");
-    process_texture_defs(&wad, &patch_names, &texture_defs, final_color_map, final_palette);
+    // process_texture_defs(&wad, &patch_names, &texture_defs, final_color_map, final_palette);
 
     let map = if let Some(map) = args.map.as_ref() {
         map.as_str()
@@ -827,7 +949,19 @@ fn main() {
 
     println!("Converting '{}' to mime map", map);
 
-    let map = generate_3d_map(&wad, map);
-    map.save_to_file(output)
+    let mut texture_queue = TextureQueue::new();
+
+    let map = generate_3d_map(&wad, &mut texture_queue, map);
+
+    for t in texture_queue.textures {
+        let texture = texture_loader.load(&wad, &t)
+            .expect("Failed to load texture");
+        println!("{}: {}, {}", t, texture.width, texture.height);
+    }
+
+    let mut mime = mime::Mime::new();
+    mime.add_map(map);
+
+    mime.save_to_file(output)
         .expect("Failed to save the generated map to the file");
 }
