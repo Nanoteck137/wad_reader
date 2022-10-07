@@ -348,10 +348,10 @@ fn generate_sector_wall(map: &wad::Map, sector: &wad::Sector) -> Mesh {
 
                 let color = COLOR_TABLE[index];
 
-                if linedef.flags & wad::LINEDEF_FLAG_IMPASSABLE ==
-                    wad::LINEDEF_FLAG_IMPASSABLE &&
-                    linedef.flags & wad::LINEDEF_FLAG_TWO_SIDED !=
-                        wad::LINEDEF_FLAG_TWO_SIDED
+                if linedef.flags & wad::LINEDEF_FLAG_IMPASSABLE
+                    == wad::LINEDEF_FLAG_IMPASSABLE
+                    && linedef.flags & wad::LINEDEF_FLAG_TWO_SIDED
+                        != wad::LINEDEF_FLAG_TWO_SIDED
                 {
                     let dx = (end.x - start.x).abs();
                     let dy = (end.y - start.y).abs();
@@ -454,8 +454,8 @@ fn generate_sector_wall(map: &wad::Map, sector: &wad::Sector) -> Mesh {
                     }
                 };
 
-                if linedef.front_sidedef.is_some() &&
-                    linedef.back_sidedef.is_some()
+                if linedef.front_sidedef.is_some()
+                    && linedef.back_sidedef.is_some()
                 {
                     let front_sidedef = linedef.front_sidedef.unwrap();
                     let front_sidedef = map.sidedefs[front_sidedef];
@@ -475,8 +475,8 @@ fn generate_sector_wall(map: &wad::Map, sector: &wad::Sector) -> Mesh {
                     }
 
                     // Generate the height difference
-                    if front_sector.ceiling_height !=
-                        back_sector.ceiling_height
+                    if front_sector.ceiling_height
+                        != back_sector.ceiling_height
                     {
                         let front = front_sector.ceiling_height;
                         let back = back_sector.ceiling_height;
@@ -1211,11 +1211,15 @@ impl Gltf {
     ) -> AccessorId {
         let id = self.accessors.len();
 
+        // NOTE(patrik): From GLAD OpenGL Loader headers
+        const GL_UNSIGNED_INT: usize = 0x1405;
+        const GL_FLOAT: usize = 0x1406;
+
         let (component_type, typ) = match data_typ {
-            DataTyp::Uint32 => (0, "SCALAR"),
-            DataTyp::Vec2f => (0, "VEC2"),
-            DataTyp::Vec3f => (0, "VEC3"),
-            DataTyp::Vec4f => (0, "VEC4"),
+            DataTyp::Uint32 => (GL_UNSIGNED_INT, "SCALAR"),
+            DataTyp::Vec2f => (GL_FLOAT, "VEC2"),
+            DataTyp::Vec3f => (GL_FLOAT, "VEC3"),
+            DataTyp::Vec4f => (GL_FLOAT, "VEC4"),
         };
 
         let accessor = GltfAccessor {
