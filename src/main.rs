@@ -1492,7 +1492,7 @@ where
 
     let data = gltf.write_model();
     let mut file = File::create(output_file).unwrap();
-    file.write_all(&data);
+    file.write_all(&data).unwrap();
 }
 
 fn main() {
@@ -1564,7 +1564,7 @@ fn main() {
     let mut texture_queue = TextureQueue::new();
 
     let map = generate_3d_map(&wad, &mut texture_queue, map);
-    write_map_gltf(map, output);
+    write_gltf_file(map, output);
 
     // for t in texture_queue.textures {
     //     let texture = texture_loader
