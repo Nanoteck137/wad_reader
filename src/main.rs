@@ -518,14 +518,14 @@ fn generate_3d_map(
 
     let mut sectors = Vec::new();
 
-    let map_sector =
-        generate_sector_from_wad(&map, texture_queue, &map.sectors[50]);
-    sectors.push(map_sector);
+    // let map_sector =
+    //     generate_sector_from_wad(&map, texture_queue, &map.sectors[50]);
+    // sectors.push(map_sector);
 
-    // for sector in &map.sectors {
-    //     let map_sector = generate_sector_from_wad(&map, texture_queue, sector);
-    //     sectors.push(map_sector);
-    // }
+    for sector in &map.sectors {
+        let map_sector = generate_sector_from_wad(&map, texture_queue, sector);
+        sectors.push(map_sector);
+    }
 
     println!("Num Sectors: {}", sectors.len());
 
@@ -1082,7 +1082,7 @@ struct GltfScene {
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
-struct Gltf {
+struct GltfJson {
     accessors: Vec<GltfAccessor>,
     asset: GltfAsset,
     buffer_views: Vec<GltfBufferView>,
@@ -1094,42 +1094,293 @@ struct Gltf {
     scenes: Vec<GltfScene>,
 }
 
+type BufferViewId = usize;
+type MaterialId = usize;
+type AccessorId = usize;
+type MeshId = usize;
+
+#[derive(Copy, Clone, PartialEq, Debug)]
+enum DataTyp {
+    Uint32,
+    Vec2f,
+    Vec3f,
+    Vec4f,
+}
+
+struct Gltf {
+    data_buffer: Vec<u8>,
+    buffer_views: Vec<GltfBufferView>,
+    materials: Vec<GltfMaterial>,
+    accessors: Vec<GltfAccessor>,
+    meshes: Vec<GltfMesh>,
+}
+
+impl Gltf {
+    fn new() -> Self {
+        Self {
+            data_buffer: Vec::new(),
+            buffer_views: Vec::new(),
+            materials: Vec::new(),
+            accessors: Vec::new(),
+            meshes: Vec::new(),
+        }
+    }
+
+    fn create_material(&mut self, name: String, color: Vec4) -> MaterialId {
+        let id = self.materials.len();
+        let material = GltfMaterial {
+            name,
+            double_sided: false,
+            pbr_metallic_roughness: GltfPbr {
+                base_color_factor: [color.x, color.y, color.z, color.w],
+                metallic_factor: 0.0,
+                roughness_factor: 1.0,
+            },
+        };
+
+        self.materials.push(material);
+        id
+    }
+
+    fn create_mesh(&mut self, name: String) -> MeshId {
+        let id = self.meshes.len();
+        let mesh = GltfMesh {
+            name,
+            primitives: Vec::new(),
+        };
+
+        self.meshes.push(mesh);
+        id
+    }
+
+    fn create_buffer_view(
+        &mut self,
+        start: usize,
+        length: usize,
+    ) -> BufferViewId {
+        let id = self.buffer_views.len();
+        let buffer_view = GltfBufferView {
+            buffer: 0,
+            byte_length: length,
+            byte_offset: start,
+        };
+
+        self.buffer_views.push(buffer_view);
+        id
+    }
+
+    fn add_vertex_buffer(&mut self, vertices: &[Vec3]) -> BufferViewId {
+        let start = self.data_buffer.len();
+
+        for vertex in vertices {
+            let x = vertex.x / 50.0;
+            let y = vertex.y / 50.0;
+            let z = vertex.z / 50.0;
+
+            self.data_buffer.extend_from_slice(&x.to_le_bytes());
+            self.data_buffer.extend_from_slice(&y.to_le_bytes());
+            self.data_buffer.extend_from_slice(&z.to_le_bytes());
+        }
+
+        let end = self.data_buffer.len();
+
+        let length = end - start;
+
+        self.create_buffer_view(start, length)
+    }
+
+    fn add_index_buffer(&mut self, indices: &[u32]) -> BufferViewId {
+        let start = self.data_buffer.len();
+
+        for index in indices {
+            self.data_buffer.extend_from_slice(&index.to_le_bytes())
+        }
+
+        let end = self.data_buffer.len();
+
+        let length = end - start;
+
+        self.create_buffer_view(start, length)
+    }
+
+    fn create_accessor(
+        &mut self,
+        buffer_view_id: BufferViewId,
+        count: usize,
+        data_typ: DataTyp,
+    ) -> AccessorId {
+        let id = self.accessors.len();
+
+        let (component_type, typ) = match data_typ {
+            DataTyp::Uint32 => (0, "SCALAR"),
+            DataTyp::Vec2f => (0, "VEC2"),
+            DataTyp::Vec3f => (0, "VEC3"),
+            DataTyp::Vec4f => (0, "VEC4"),
+        };
+
+        let accessor = GltfAccessor {
+            buffer_view: buffer_view_id,
+            component_type,
+            count,
+            typ: typ.to_string(),
+        };
+        self.accessors.push(accessor);
+
+        id
+    }
+
+    fn add_mesh_primitive(
+        &mut self,
+        mesh_id: MeshId,
+        mesh: &Mesh,
+        material_id: MaterialId,
+    ) {
+        let pos = mesh
+            .vertex_buffer
+            .iter()
+            .map(|v| v.pos)
+            .collect::<Vec<Vec3>>();
+        let vertex_buffer_view = self.add_vertex_buffer(&pos);
+        println!("{:#?}", self.buffer_views[vertex_buffer_view]);
+        let vertex_buffer_access = self.create_accessor(
+            vertex_buffer_view,
+            pos.len(),
+            DataTyp::Vec3f,
+        );
+
+        let index_buffer_view = self.add_index_buffer(&mesh.index_buffer);
+        println!("{:#?}", self.buffer_views[index_buffer_view]);
+        let index_buffer_access = self.create_accessor(
+            index_buffer_view,
+            mesh.index_buffer.len(),
+            DataTyp::Uint32,
+        );
+
+        let mut attributes = HashMap::new();
+        attributes.insert("POSITION".to_string(), vertex_buffer_access);
+
+        let primitive = GltfPrimitive {
+            mode: 4,
+            attributes,
+            indices: index_buffer_access,
+            material: material_id,
+        };
+        self.meshes[mesh_id].primitives.push(primitive);
+    }
+}
+
 fn write_gltf_file(map: Map) {
+    let mut gltf = Gltf::new();
+
+    let sector_index = 50;
+    let sector = &map.sectors[sector_index];
+
+    let material_id = gltf.create_material(
+        format!("Sector #{}", sector_index),
+        Vec4::new(1.0, 0.0, 1.0, 1.0),
+    );
+    let mesh_id = gltf.create_mesh(format!("Sector #{}", sector_index));
+    gltf.add_mesh_primitive(mesh_id, &sector.floor_mesh, material_id);
+
     let mut buffer: Vec<u8> = vec![];
 
-    let sector = &map.sectors[0];
-    let mesh = &sector.floor_mesh;
+    let (
+        vertex_count,
+        vertex_offset,
+        vertex_length,
+        index_count,
+        index_offset,
+        index_length,
+    ) = {
+        let mesh = &sector.floor_mesh;
 
-    let vertex_byte_offset = buffer.len();
-    let mut vertices = vec![];
-    for vert in &mesh.vertex_buffer {
-        vertices.push(vert.pos);
-    }
+        let vertex_byte_offset = buffer.len();
+        let mut vertices = vec![];
+        for vert in &mesh.vertex_buffer {
+            vertices.push(vert.pos);
+        }
 
-    for vertex in &vertices {
-        let x = vertex.x / 50.0;
-        let y = vertex.y / 50.0;
-        let z = vertex.z / 50.0;
-        println!("{}, {}, {}", x, y, z);
-        buffer.extend_from_slice(&x.to_le_bytes());
-        buffer.extend_from_slice(&y.to_le_bytes());
-        buffer.extend_from_slice(&z.to_le_bytes());
-    }
+        for vertex in &vertices {
+            let x = vertex.x / 50.0;
+            let y = vertex.y / 50.0;
+            let z = vertex.z / 50.0;
+            buffer.extend_from_slice(&x.to_le_bytes());
+            buffer.extend_from_slice(&y.to_le_bytes());
+            buffer.extend_from_slice(&z.to_le_bytes());
+        }
 
-    let vertex_byte_length = buffer.len();
+        let vertex_byte_length = buffer.len();
 
-    let index_byte_offset = buffer.len();
+        let index_byte_offset = buffer.len();
 
-    let index_count = mesh.index_buffer.len();
-    for index in &mesh.index_buffer {
-        println!("Index: {}", index);
-        buffer.extend_from_slice(&index.to_le_bytes());
-    }
+        let index_count = mesh.index_buffer.len();
+        for index in &mesh.index_buffer {
+            buffer.extend_from_slice(&index.to_le_bytes());
+        }
 
-    let index_byte_length = index_count * 4;
+        let index_byte_length = index_count * 4;
 
-    println!("Vertex: {} {}", vertex_byte_offset, vertex_byte_length);
-    println!("Index: {} {}", index_byte_offset, index_byte_length);
+        (
+            vertices.len(),
+            vertex_byte_offset,
+            vertex_byte_length,
+            index_count,
+            index_byte_offset,
+            index_byte_length,
+        )
+    };
+
+    let (
+        vertex_count2,
+        vertex_offset2,
+        vertex_length2,
+        index_count2,
+        index_offset2,
+        index_length2,
+    ) = {
+        let mesh = &sector.ceiling_mesh;
+
+        let vertex_byte_offset = buffer.len();
+        let mut vertices = vec![];
+        for vert in &mesh.vertex_buffer {
+            vertices.push(vert.pos);
+        }
+
+        for vertex in &vertices {
+            let x = vertex.x / 50.0;
+            let y = vertex.y / 50.0;
+            let z = vertex.z / 50.0;
+            buffer.extend_from_slice(&x.to_le_bytes());
+            buffer.extend_from_slice(&y.to_le_bytes());
+            buffer.extend_from_slice(&z.to_le_bytes());
+        }
+
+        let vertex_byte_length = buffer.len();
+
+        let index_byte_offset = buffer.len();
+
+        let index_count = mesh.index_buffer.len();
+        for index in &mesh.index_buffer {
+            buffer.extend_from_slice(&index.to_le_bytes());
+        }
+
+        let index_byte_length = index_count * 4;
+
+        (
+            vertices.len(),
+            vertex_byte_offset,
+            vertex_byte_length,
+            index_count,
+            index_byte_offset,
+            index_byte_length,
+        )
+    };
+
+    println!("Vertex: {} {}", vertex_offset, vertex_length);
+    println!("Index: {} {}", index_offset, index_length);
+
+    println!("Vertex2: {} {}", vertex_offset2, vertex_length2);
+    println!("Index2: {} {}", index_offset2, index_length2);
 
     let test_buffer = GltfBuffer {
         byte_length: buffer.len(),
@@ -1139,15 +1390,29 @@ fn write_gltf_file(map: Map) {
 
     let vertex_buffer_view = GltfBufferView {
         buffer: 0,
-        byte_length: vertex_byte_length,
-        byte_offset: vertex_byte_offset,
+        byte_length: vertex_length,
+        byte_offset: vertex_offset,
     };
     buffer_views.push(vertex_buffer_view);
 
     let index_buffer_view = GltfBufferView {
         buffer: 0,
-        byte_length: index_byte_length,
-        byte_offset: index_byte_offset,
+        byte_length: index_length,
+        byte_offset: index_offset,
+    };
+    buffer_views.push(index_buffer_view);
+
+    let vertex_buffer_view = GltfBufferView {
+        buffer: 0,
+        byte_length: vertex_length2,
+        byte_offset: vertex_offset2,
+    };
+    buffer_views.push(vertex_buffer_view);
+
+    let index_buffer_view = GltfBufferView {
+        buffer: 0,
+        byte_length: index_length2,
+        byte_offset: index_offset2,
     };
     buffer_views.push(index_buffer_view);
 
@@ -1155,7 +1420,7 @@ fn write_gltf_file(map: Map) {
     let position_accessor = GltfAccessor {
         buffer_view: 0,
         component_type: 5126,
-        count: vertices.len(),
+        count: vertex_count,
         typ: "VEC3".to_string(),
     };
     let position_attrib = accessors.len();
@@ -1170,8 +1435,36 @@ fn write_gltf_file(map: Map) {
     let index_buffer = accessors.len();
     accessors.push(index_accessor);
 
+    let position_accessor = GltfAccessor {
+        buffer_view: 2,
+        component_type: 5126,
+        count: vertex_count2,
+        typ: "VEC3".to_string(),
+    };
+    let position_attrib2 = accessors.len();
+    accessors.push(position_accessor);
+
+    let index_accessor = GltfAccessor {
+        buffer_view: 3,
+        component_type: 0x1405,
+        count: index_count2,
+        typ: "SCALAR".to_string(),
+    };
+    let index_buffer2 = accessors.len();
+    accessors.push(index_accessor);
+
     let test_material = GltfMaterial {
         name: "Test Material".to_string(),
+        double_sided: false,
+        pbr_metallic_roughness: GltfPbr {
+            base_color_factor: [1.0, 0.0, 1.0, 1.0],
+            metallic_factor: 1.0,
+            roughness_factor: 1.0,
+        },
+    };
+
+    let test_material2 = GltfMaterial {
+        name: "Test Material 2".to_string(),
         double_sided: false,
         pbr_metallic_roughness: GltfPbr {
             base_color_factor: [1.0, 0.0, 1.0, 1.0],
@@ -1184,6 +1477,7 @@ fn write_gltf_file(map: Map) {
     test_mesh_attributes.insert("POSITION".to_string(), position_attrib);
     // test_mesh_attributes.insert("NORMAL".to_string(), 0);
     // test_mesh_attributes.insert("TEXCOORD_0".to_string(), 0);
+    //
 
     let test_mesh_primitive = GltfPrimitive {
         mode: 4,
@@ -1192,9 +1486,19 @@ fn write_gltf_file(map: Map) {
         material: 0,
     };
 
+    let mut test_mesh_attributes2 = HashMap::new();
+    test_mesh_attributes2.insert("POSITION".to_string(), position_attrib2);
+
+    let test_mesh_primitive2 = GltfPrimitive {
+        mode: 4,
+        attributes: test_mesh_attributes2,
+        indices: index_buffer2,
+        material: 1,
+    };
+
     let test_mesh = GltfMesh {
         name: "Test Mesh".to_string(),
-        primitives: vec![test_mesh_primitive],
+        primitives: vec![test_mesh_primitive, test_mesh_primitive2],
     };
 
     let test_node = GltfNode {
@@ -1212,22 +1516,23 @@ fn write_gltf_file(map: Map) {
         version: "2.0".to_string(),
     };
 
-    let gltf = Gltf {
+    let gltf_json = GltfJson {
         accessors,
         asset,
         buffer_views,
         buffers: vec![test_buffer],
-        materials: vec![test_material],
+        materials: vec![test_material, test_material2],
         meshes: vec![test_mesh],
         nodes: vec![test_node],
         scene: 0,
         scenes: vec![scene],
     };
 
-    let text = serde_json::to_string_pretty(&gltf).unwrap();
-    println!("{}", text);
+    let text = serde_json::to_string_pretty(&gltf_json).unwrap();
+    // NOTE(patrik): Debug JSON
+    // println!("{}", text);
 
-    let mut text = serde_json::to_string(&gltf).unwrap();
+    let mut text = serde_json::to_string(&gltf_json).unwrap();
     // TODO(patrik): Fix?
     let padding = text.as_bytes().len() % 4;
     for _ in 0..(4 - padding) {
