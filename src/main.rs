@@ -1564,7 +1564,7 @@ fn main() {
     let mut texture_queue = TextureQueue::new();
 
     let map = generate_3d_map(&wad, &mut texture_queue, map);
-    write_gltf_file(map, output);
+    write_map_gltf(map, output);
 
     // for t in texture_queue.textures {
     //     let texture = texture_loader
