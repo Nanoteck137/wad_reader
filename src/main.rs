@@ -247,14 +247,14 @@ impl Sector {
 
 struct Map {
     sectors: Vec<Sector>,
-    extra_mesh: Mesh,
+    slope_mesh: Mesh,
 }
 
 impl Map {
-    fn new(sectors: Vec<Sector>, extra_mesh: Mesh) -> Self {
+    fn new(sectors: Vec<Sector>, slope_mesh: Mesh) -> Self {
         Self {
             sectors,
-            extra_mesh,
+            slope_mesh,
         }
     }
 }
@@ -338,7 +338,7 @@ fn generate_sector_ceiling(map: &wad::Map, sector: &wad::Sector) -> Mesh {
 fn generate_sector_wall(
     map: &wad::Map,
     sector: &wad::Sector,
-    extra_mesh: &mut Mesh,
+    slope_mesh: &mut Mesh,
 ) -> Mesh {
     let mut mesh = Mesh::new();
 
@@ -534,7 +534,7 @@ fn generate_sector_wall(
 
                         if diff <= 24.0 {
                             let verts = generate_slope(front, back, diff);
-                            extra_mesh.add_vertices(verts, false, false);
+                            slope_mesh.add_vertices(verts, false, false);
                         }
 
                         let verts = generate_wall(front, back, false);
@@ -567,11 +567,11 @@ fn generate_sector_from_wad(
     map: &wad::Map,
     texture_queue: &mut TextureQueue,
     sector: &wad::Sector,
-    extra_mesh: &mut Mesh,
+    slope_mesh: &mut Mesh,
 ) -> Sector {
     let floor_mesh = generate_sector_floor(map, texture_queue, sector);
     let ceiling_mesh = generate_sector_ceiling(map, sector);
-    let wall_mesh = generate_sector_wall(map, sector, extra_mesh);
+    let wall_mesh = generate_sector_wall(map, sector, slope_mesh);
 
     Sector::new(floor_mesh, ceiling_mesh, wall_mesh)
 }
@@ -591,21 +591,21 @@ fn generate_3d_map(
     //     generate_sector_from_wad(&map, texture_queue, &map.sectors[50]);
     // sectors.push(map_sector);
 
-    let mut extra_mesh = Mesh::new();
+    let mut slope_mesh = Mesh::new();
 
     for sector in &map.sectors {
         let map_sector = generate_sector_from_wad(
             &map,
             texture_queue,
             sector,
-            &mut extra_mesh,
+            &mut slope_mesh,
         );
         sectors.push(map_sector);
     }
 
     println!("Num Sectors: {}", sectors.len());
 
-    Map::new(sectors, extra_mesh)
+    Map::new(sectors, slope_mesh)
 }
 
 #[derive(Parser, Debug)]
@@ -1506,14 +1506,10 @@ where
         gltf.add_node_to_scene(scene_id, node_id);
     }
 
-    let extra_mesh_id = gltf.create_mesh("Extra Mesh".to_string());
-    let material_id = gltf.create_material(
-        "Extra Mesh Material".to_string(),
-        Vec4::new(1.0, 1.0, 1.0, 1.0),
-    );
-    gltf.add_mesh_primitive(extra_mesh_id, &map.extra_mesh, material_id);
+    let slope_mesh_id = gltf.create_mesh("Slope Mesh".to_string());
+    gltf.add_mesh_primitive(slope_mesh_id, &map.slope_mesh, 0);
     let extra_node_id =
-        gltf.create_node("Extra Mesh-colonly".to_string(), extra_mesh_id);
+        gltf.create_node("Slope Mesh-colonly".to_string(), slope_mesh_id);
     gltf.add_node_to_scene(scene_id, extra_node_id);
 
     let data = gltf.write_model();
