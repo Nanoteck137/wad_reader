@@ -21,6 +21,83 @@ impl Vec3 {
     pub const fn new(x: f32, y: f32, z: f32) -> Self {
         Self { x, y, z }
     }
+
+    pub fn normalize(&self) -> Self {
+        let length =
+            ((self.x * self.x) + (self.y * self.y) + (self.z * self.z)).sqrt();
+        println!("{}", length);
+        println!("{}, {}, {}", self.x, self.y, self.z);
+
+        *self / length
+    }
+
+    pub fn cross(&self, other: Self) -> Self {
+        let x = self.y * other.z - self.z * other.y;
+        let y = self.z * other.x - self.x * other.z;
+        let z = self.x * other.y - self.y * other.x;
+
+        Self::new(x, y, z)
+    }
+}
+
+impl std::ops::Add<Vec3> for Vec3 {
+    type Output = Vec3;
+
+    fn add(self, rhs: Vec3) -> Vec3 {
+        let x = self.x + rhs.x;
+        let y = self.y + rhs.y;
+        let z = self.z + rhs.z;
+
+        Vec3::new(x, y, z)
+    }
+}
+
+impl std::ops::Sub<Vec3> for Vec3 {
+    type Output = Vec3;
+
+    fn sub(self, rhs: Vec3) -> Vec3 {
+        let x = self.x - rhs.x;
+        let y = self.y - rhs.y;
+        let z = self.z - rhs.z;
+
+        Vec3::new(x, y, z)
+    }
+}
+
+impl std::ops::Mul<Vec3> for Vec3 {
+    type Output = Vec3;
+
+    fn mul(self, rhs: Vec3) -> Vec3 {
+        let x = self.x * rhs.x;
+        let y = self.y * rhs.y;
+        let z = self.z * rhs.z;
+
+        Vec3::new(x, y, z)
+    }
+}
+
+impl std::ops::Mul<f32> for Vec3 {
+    type Output = Vec3;
+
+    fn mul(self, rhs: f32) -> Vec3 {
+        let x = self.x * rhs;
+        let y = self.y * rhs;
+        let z = self.z * rhs;
+
+        Vec3::new(x, y, z)
+    }
+}
+
+impl std::ops::Div<f32> for Vec3 {
+    type Output = Vec3;
+
+    fn div(self, rhs: f32) -> Vec3 {
+        let x = self.x / rhs;
+        let y = self.y / rhs;
+        let z = self.z / rhs;
+
+        Vec3::new(x, y, z)
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
