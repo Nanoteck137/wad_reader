@@ -2,8 +2,11 @@ use std::fs::File;
 use std::io::BufWriter;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::collections::HashMap;
 
 use clap::Parser;
+use serde::{Serialize, Deserialize};
+use serde_json::Value;
 
 use wad::Wad;
 use gltf::{Vec2, Vec3, Vec4, Vertex};
@@ -345,10 +348,10 @@ fn generate_sector_wall(map: &wad::Map, sector: &wad::Sector) -> Mesh {
 
                 let color = COLOR_TABLE[index];
 
-                if linedef.flags & wad::LINEDEF_FLAG_IMPASSABLE
-                    == wad::LINEDEF_FLAG_IMPASSABLE
-                    && linedef.flags & wad::LINEDEF_FLAG_TWO_SIDED
-                        != wad::LINEDEF_FLAG_TWO_SIDED
+                if linedef.flags & wad::LINEDEF_FLAG_IMPASSABLE ==
+                    wad::LINEDEF_FLAG_IMPASSABLE &&
+                    linedef.flags & wad::LINEDEF_FLAG_TWO_SIDED !=
+                        wad::LINEDEF_FLAG_TWO_SIDED
                 {
                     let dx = (end.x - start.x).abs();
                     let dy = (end.y - start.y).abs();
@@ -451,8 +454,8 @@ fn generate_sector_wall(map: &wad::Map, sector: &wad::Sector) -> Mesh {
                     }
                 };
 
-                if linedef.front_sidedef.is_some()
-                    && linedef.back_sidedef.is_some()
+                if linedef.front_sidedef.is_some() &&
+                    linedef.back_sidedef.is_some()
                 {
                     let front_sidedef = linedef.front_sidedef.unwrap();
                     let front_sidedef = map.sidedefs[front_sidedef];
@@ -472,8 +475,8 @@ fn generate_sector_wall(map: &wad::Map, sector: &wad::Sector) -> Mesh {
                     }
 
                     // Generate the height difference
-                    if front_sector.ceiling_height
-                        != back_sector.ceiling_height
+                    if front_sector.ceiling_height !=
+                        back_sector.ceiling_height
                     {
                         let front = front_sector.ceiling_height;
                         let back = back_sector.ceiling_height;
@@ -1000,7 +1003,262 @@ fn process_texture_defs(
     }
 }
 
-fn write_gltf_file() {}
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct GltfAccessor {
+    buffer_view: usize,
+    component_type: usize,
+    count: usize,
+    #[serde(rename = "type")]
+    typ: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct GltfAsset {
+    generator: String,
+    version: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct GltfBufferView {
+    buffer: usize,
+    byte_length: usize,
+    byte_offset: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct GltfBuffer {
+    byte_length: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct GltfPbr {
+    base_color_factor: [f32; 4],
+    metallic_factor: f32,
+    roughness_factor: f32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct GltfMaterial {
+    name: String,
+    double_sided: bool,
+    pbr_metallic_roughness: GltfPbr,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct GltfPrimitive {
+    mode: usize,
+    attributes: HashMap<String, usize>,
+    indices: usize,
+    material: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct GltfMesh {
+    name: String,
+    primitives: Vec<GltfPrimitive>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct GltfNode {
+    name: String,
+    mesh: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct GltfScene {
+    name: String,
+    nodes: Vec<usize>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct Gltf {
+    accessors: Vec<GltfAccessor>,
+    asset: GltfAsset,
+    buffer_views: Vec<GltfBufferView>,
+    buffers: Vec<GltfBuffer>,
+    materials: Vec<GltfMaterial>,
+    meshes: Vec<GltfMesh>,
+    nodes: Vec<GltfNode>,
+    scene: usize,
+    scenes: Vec<GltfScene>,
+}
+
+fn write_gltf_file(map: Map) {
+    let mut buffer: Vec<u8> = vec![];
+
+    let sector = &map.sectors[0];
+    let mesh = &sector.floor_mesh;
+
+    let vertex_byte_offset = buffer.len();
+    let mut vertices = vec![];
+    for vert in &mesh.vertex_buffer {
+        vertices.push(vert.pos);
+    }
+
+    for vertex in &vertices {
+        let x = vertex.x / 50.0;
+        let y = vertex.y / 50.0;
+        let z = vertex.z / 50.0;
+        println!("{}, {}, {}", x, y, z);
+        buffer.extend_from_slice(&x.to_le_bytes());
+        buffer.extend_from_slice(&y.to_le_bytes());
+        buffer.extend_from_slice(&z.to_le_bytes());
+    }
+
+    let vertex_byte_length = buffer.len();
+
+    let index_byte_offset = buffer.len();
+
+    let index_count = mesh.index_buffer.len();
+    for index in &mesh.index_buffer {
+        println!("Index: {}", index);
+        buffer.extend_from_slice(&index.to_le_bytes());
+    }
+
+    let index_byte_length = index_count * 4;
+
+    println!("Vertex: {} {}", vertex_byte_offset, vertex_byte_length);
+    println!("Index: {} {}", index_byte_offset, index_byte_length);
+
+    let test_buffer = GltfBuffer {
+        byte_length: buffer.len(),
+    };
+
+    let mut buffer_views = Vec::new();
+
+    let vertex_buffer_view = GltfBufferView {
+        buffer: 0,
+        byte_length: vertex_byte_length,
+        byte_offset: vertex_byte_offset,
+    };
+    buffer_views.push(vertex_buffer_view);
+
+    let index_buffer_view = GltfBufferView {
+        buffer: 0,
+        byte_length: index_byte_length,
+        byte_offset: index_byte_offset,
+    };
+    buffer_views.push(index_buffer_view);
+
+    let mut accessors = vec![];
+    let position_accessor = GltfAccessor {
+        buffer_view: 0,
+        component_type: 5126,
+        count: vertices.len(),
+        typ: "VEC3".to_string(),
+    };
+    let position_attrib = accessors.len();
+    accessors.push(position_accessor);
+
+    let index_accessor = GltfAccessor {
+        buffer_view: 1,
+        component_type: 0x1405,
+        count: index_count,
+        typ: "SCALAR".to_string(),
+    };
+    let index_buffer = accessors.len();
+    accessors.push(index_accessor);
+
+    let test_material = GltfMaterial {
+        name: "Test Material".to_string(),
+        double_sided: false,
+        pbr_metallic_roughness: GltfPbr {
+            base_color_factor: [1.0, 0.0, 1.0, 1.0],
+            metallic_factor: 1.0,
+            roughness_factor: 1.0,
+        },
+    };
+
+    let mut test_mesh_attributes = HashMap::new();
+    test_mesh_attributes.insert("POSITION".to_string(), position_attrib);
+    // test_mesh_attributes.insert("NORMAL".to_string(), 0);
+    // test_mesh_attributes.insert("TEXCOORD_0".to_string(), 0);
+
+    let test_mesh_primitive = GltfPrimitive {
+        mode: 4,
+        attributes: test_mesh_attributes,
+        indices: index_buffer,
+        material: 0,
+    };
+
+    let test_mesh = GltfMesh {
+        name: "Test Mesh".to_string(),
+        primitives: vec![test_mesh_primitive],
+    };
+
+    let test_node = GltfNode {
+        name: "Test Node".to_string(),
+        mesh: 0,
+    };
+
+    let scene = GltfScene {
+        name: "Test Scene".to_string(),
+        nodes: vec![0],
+    };
+
+    let asset = GltfAsset {
+        generator: "Testing".to_string(),
+        version: "2.0".to_string(),
+    };
+
+    let gltf = Gltf {
+        accessors,
+        asset,
+        buffer_views,
+        buffers: vec![test_buffer],
+        materials: vec![test_material],
+        meshes: vec![test_mesh],
+        nodes: vec![test_node],
+        scene: 0,
+        scenes: vec![scene],
+    };
+
+    let text = serde_json::to_string_pretty(&gltf).unwrap();
+    println!("{}", text);
+
+    let mut text = serde_json::to_string(&gltf).unwrap();
+    // TODO(patrik): Fix?
+    let padding = text.as_bytes().len() % 4;
+    for _ in 0..(4 - padding) {
+        text.push(' ');
+    }
+
+    assert_eq!(text.len(), text.as_bytes().len());
+
+    let mut bin_buffer: Vec<u8> = Vec::new();
+    bin_buffer.extend_from_slice(&0x46546c67u32.to_le_bytes());
+    bin_buffer.extend_from_slice(&2u32.to_le_bytes());
+    bin_buffer.extend_from_slice(&0u32.to_le_bytes());
+
+    // JSON Chunk
+    let data = text.as_bytes();
+    bin_buffer.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    bin_buffer.extend_from_slice(&0x4e4f534au32.to_le_bytes());
+    bin_buffer.extend_from_slice(data);
+
+    // Binary Buffer Chunk
+    bin_buffer.extend_from_slice(&(buffer.len() as u32).to_le_bytes());
+    bin_buffer.extend_from_slice(&0x004e4942u32.to_le_bytes());
+    bin_buffer.extend_from_slice(&buffer);
+
+    let total_size = bin_buffer.len() as u32;
+    bin_buffer[8..12].copy_from_slice(&total_size.to_le_bytes());
+
+    use std::io::Write;
+    let mut file = File::create("test.glb").unwrap();
+    file.write_all(&bin_buffer).unwrap();
+}
 
 fn main() {
     let args = Args::parse();
@@ -1071,6 +1329,7 @@ fn main() {
     let mut texture_queue = TextureQueue::new();
 
     let map = generate_3d_map(&wad, &mut texture_queue, map);
+    write_gltf_file(map);
 
     // for t in texture_queue.textures {
     //     let texture = texture_loader
