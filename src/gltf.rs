@@ -25,8 +25,6 @@ impl Vec3 {
     pub fn normalize(&self) -> Self {
         let length =
             ((self.x * self.x) + (self.y * self.y) + (self.z * self.z)).sqrt();
-        println!("{}", length);
-        println!("{}, {}, {}", self.x, self.y, self.z);
 
         *self / length
     }
