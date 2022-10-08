@@ -1116,6 +1116,24 @@ struct GltfAccessor {
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
+struct GltfSampler {
+    name: String,
+    mag_filter: usize,
+    min_filter: usize,
+    wrap_s: usize,
+    wrap_t: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct GltfTexture {
+    name: String,
+    sampler: usize,
+    source: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 struct GltfAsset {
     generator: String,
     version: String,
@@ -1137,8 +1155,16 @@ struct GltfBuffer {
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
+struct GltfTextureInfo {
+    index: usize,
+    tex_coord: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 struct GltfPbr {
     base_color_factor: [f32; 4],
+    base_color_texture: Option<GltfTextureInfo>,
     metallic_factor: f32,
     roughness_factor: f32,
 }
@@ -1183,6 +1209,14 @@ struct GltfScene {
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
+struct GltfImage {
+    name: String,
+    mime_type: String,
+    buffer_view: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 struct GltfJson {
     accessors: Vec<GltfAccessor>,
     asset: GltfAsset,
@@ -1193,12 +1227,18 @@ struct GltfJson {
     nodes: Vec<GltfNode>,
     scene: usize,
     scenes: Vec<GltfScene>,
+    samplers: Vec<GltfSampler>,
+    images: Vec<GltfImage>,
+    textures: Vec<GltfTexture>,
 }
 
 type BufferViewId = usize;
 type MaterialId = usize;
 type AccessorId = usize;
+type SamplerId = usize;
+type TextureId = usize;
 type SceneId = usize;
+type ImageId = usize;
 type MeshId = usize;
 type NodeId = usize;
 
@@ -1215,7 +1255,10 @@ struct Gltf {
     buffer_views: Vec<GltfBufferView>,
     materials: Vec<GltfMaterial>,
     accessors: Vec<GltfAccessor>,
+    samplers: Vec<GltfSampler>,
+    textures: Vec<GltfTexture>,
     scenes: Vec<GltfScene>,
+    images: Vec<GltfImage>,
     meshes: Vec<GltfMesh>,
     nodes: Vec<GltfNode>,
 }
@@ -1227,19 +1270,86 @@ impl Gltf {
             buffer_views: Vec::new(),
             materials: Vec::new(),
             accessors: Vec::new(),
+            samplers: Vec::new(),
+            textures: Vec::new(),
             scenes: Vec::new(),
+            images: Vec::new(),
             meshes: Vec::new(),
             nodes: Vec::new(),
         }
     }
 
-    fn create_material(&mut self, name: String, color: Vec4) -> MaterialId {
+    fn create_sampler(&mut self, name: String) -> SamplerId {
+        let id = self.samplers.len();
+
+        const NEAREST: usize = 9728;
+
+        const REPEAT: usize = 10497;
+
+        let sampler = GltfSampler {
+            name,
+            mag_filter: NEAREST,
+            min_filter: NEAREST,
+            wrap_s: REPEAT,
+            wrap_t: REPEAT,
+        };
+
+        self.samplers.push(sampler);
+        id
+    }
+
+    fn create_image(&mut self, name: String, data: &[u8]) -> ImageId {
+        let id = self.images.len();
+
+        let start = self.data_buffer.len();
+        self.data_buffer.extend_from_slice(data);
+        let end = self.data_buffer.len();
+
+        let length = end - start;
+
+        let buffer_view = self.create_buffer_view(start, length);
+
+        let image = GltfImage {
+            name,
+            mime_type: "image/png".to_string(),
+            buffer_view,
+        };
+
+        self.images.push(image);
+        id
+    }
+
+    fn create_texture(
+        &mut self,
+        name: String,
+        sampler_id: SamplerId,
+        image_id: ImageId,
+    ) -> TextureId {
+        let id = self.textures.len();
+
+        let texture = GltfTexture {
+            name,
+            sampler: sampler_id,
+            source: image_id,
+        };
+        self.textures.push(texture);
+
+        id
+    }
+
+    fn create_material(
+        &mut self,
+        name: String,
+        color: Vec4,
+        texture: Option<GltfTextureInfo>,
+    ) -> MaterialId {
         let id = self.materials.len();
         let material = GltfMaterial {
             name,
             double_sided: false,
             pbr_metallic_roughness: GltfPbr {
                 base_color_factor: [color.x, color.y, color.z, color.w],
+                base_color_texture: texture,
                 metallic_factor: 0.0,
                 roughness_factor: 1.0,
             },
@@ -1303,6 +1413,23 @@ impl Gltf {
             self.data_buffer.extend_from_slice(&normal.x.to_le_bytes());
             self.data_buffer.extend_from_slice(&normal.y.to_le_bytes());
             self.data_buffer.extend_from_slice(&normal.z.to_le_bytes());
+        }
+
+        let end = self.data_buffer.len();
+
+        let length = end - start;
+
+        self.create_buffer_view(start, length)
+    }
+
+    fn add_uv_buffer(&mut self, uvs: &[Vec2]) -> BufferViewId {
+        let start = self.data_buffer.len();
+
+        for uv in uvs {
+            let u = uv.x / 100.0;
+            let v = uv.y / 100.0;
+            self.data_buffer.extend_from_slice(&u.to_le_bytes());
+            self.data_buffer.extend_from_slice(&v.to_le_bytes());
         }
 
         let end = self.data_buffer.len();
@@ -1391,18 +1518,6 @@ impl Gltf {
             DataTyp::Vec3f,
         );
 
-        let colors = mesh
-            .vertex_buffer
-            .iter()
-            .map(|v| v.color)
-            .collect::<Vec<Vec4>>();
-        let color_buffer_view = self.add_color_buffer(&colors);
-        let color_buffer_access = self.create_accessor(
-            color_buffer_view,
-            colors.len(),
-            DataTyp::Vec4f,
-        );
-
         let normals = mesh
             .vertex_buffer
             .iter()
@@ -1415,6 +1530,27 @@ impl Gltf {
             DataTyp::Vec3f,
         );
 
+        let uvs = mesh
+            .vertex_buffer
+            .iter()
+            .map(|v| v.uv)
+            .collect::<Vec<Vec2>>();
+        let uv_buffer_view = self.add_uv_buffer(&uvs);
+        let uv_buffer_view =
+            self.create_accessor(uv_buffer_view, uvs.len(), DataTyp::Vec2f);
+
+        let colors = mesh
+            .vertex_buffer
+            .iter()
+            .map(|v| v.color)
+            .collect::<Vec<Vec4>>();
+        let color_buffer_view = self.add_color_buffer(&colors);
+        let color_buffer_access = self.create_accessor(
+            color_buffer_view,
+            colors.len(),
+            DataTyp::Vec4f,
+        );
+
         let index_buffer_view = self.add_index_buffer(&mesh.index_buffer);
         let index_buffer_access = self.create_accessor(
             index_buffer_view,
@@ -1425,6 +1561,7 @@ impl Gltf {
         let mut attributes = HashMap::new();
         attributes.insert("POSITION".to_string(), vertex_buffer_access);
         attributes.insert("NORMAL".to_string(), normal_buffer_access);
+        attributes.insert("TEXCOORD_0".to_string(), uv_buffer_view);
         attributes.insert("COLOR_0".to_string(), color_buffer_access);
 
         let primitive = GltfPrimitive {
@@ -1483,7 +1620,13 @@ impl Gltf {
             nodes: self.nodes,
             scene: 0,
             scenes: self.scenes,
+            samplers: self.samplers,
+            images: self.images,
+            textures: self.textures,
         };
+
+        let text = serde_json::to_string_pretty(&gltf_json).unwrap();
+        println!("{}", text);
 
         let mut text = serde_json::to_string(&gltf_json).unwrap();
         // TODO(patrik): Fix?
@@ -1518,8 +1661,13 @@ impl Gltf {
     }
 }
 
-fn write_map_gltf<P>(map: Map, output_file: P)
-where
+fn write_map_gltf<P>(
+    wad: &Wad,
+    map: Map,
+    texture_queue: &TextureQueue,
+    texture_loader: &TextureLoader,
+    output_file: P,
+) where
     P: AsRef<Path>,
 {
     let mut gltf = Gltf::new();
@@ -1527,6 +1675,37 @@ where
     let map_name = "E1M1";
 
     let scene_id = gltf.create_scene(map_name.to_string());
+    let texture_sampler = gltf.create_sampler("Default Sampler".to_string());
+
+    let mut textures = Vec::new();
+    for t in &texture_queue.textures {
+        let texture = texture_loader
+            .load(&wad, &t)
+            .expect("Failed to load texture");
+        println!("{}: {}, {}", t, texture.width, texture.height);
+
+        let mut result = Vec::new();
+        {
+            let ref mut file_writer = BufWriter::new(&mut result);
+
+            let mut encoder = png::Encoder::new(
+                file_writer,
+                texture.width as u32,
+                texture.height as u32,
+            );
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+
+            let mut writer = encoder.write_header().unwrap();
+            writer.write_image_data(&texture.pixels).unwrap();
+        }
+
+        let image_id = gltf.create_image(t.clone(), &result);
+        let texture_id =
+            gltf.create_texture(t.clone(), texture_sampler, image_id);
+
+        textures.push(texture_id);
+    }
 
     for sector_index in 0..map.sectors.len() {
         let sector = &map.sectors[sector_index];
@@ -1536,6 +1715,10 @@ where
         let material_id = gltf.create_material(
             format!("Sector #{} Floor", sector_index),
             Vec4::new(1.0, 1.0, 1.0, 1.0),
+            Some(GltfTextureInfo {
+                index: textures[sector.floor_mesh.texture_id.unwrap_or(0)],
+                tex_coord: 0,
+            }),
         );
 
         gltf.add_mesh_primitive(mesh_id, &sector.floor_mesh, material_id);
@@ -1543,6 +1726,7 @@ where
         let material_id = gltf.create_material(
             format!("Sector #{} Ceiling", sector_index),
             Vec4::new(1.0, 1.0, 1.0, 1.0),
+            None,
         );
 
         gltf.add_mesh_primitive(mesh_id, &sector.ceiling_mesh, material_id);
@@ -1550,6 +1734,7 @@ where
         let material_id = gltf.create_material(
             format!("Sector #{} Walls", sector_index),
             Vec4::new(1.0, 1.0, 1.0, 1.0),
+            None,
         );
 
         gltf.add_mesh_primitive(mesh_id, &sector.wall_mesh, material_id);
@@ -1640,7 +1825,7 @@ fn main() {
     let mut texture_queue = TextureQueue::new();
 
     let map = generate_3d_map(&wad, &mut texture_queue, map);
-    write_map_gltf(map, output);
+    write_map_gltf(&wad, map, &texture_queue, &texture_loader, output);
 
     // for t in texture_queue.textures {
     //     let texture = texture_loader
