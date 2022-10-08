@@ -278,7 +278,8 @@ fn generate_sector_floor(
             let pos = Vec3::new(start.x, sector.floor_height, start.y);
             let uv = Vec2::new(start.x, start.y);
             let color = COLOR_TABLE[index];
-            vertices.push(Vertex::new(pos, uv, color));
+            let normal = Vec3::new(0.0, 1.0, 0.0);
+            vertices.push(Vertex::new(pos, normal, uv, color));
         }
 
         index += 1;
@@ -321,7 +322,8 @@ fn generate_sector_ceiling(map: &wad::Map, sector: &wad::Sector) -> Mesh {
             let pos = Vec3::new(start.x, sector.ceiling_height, start.y);
             let uv = Vec2::new(start.x, start.y);
             let color = COLOR_TABLE[index];
-            vertices.push(Vertex::new(pos, uv, color));
+            let normal = Vec3::new(0.0, -1.0, 0.0);
+            vertices.push(Vertex::new(pos, normal, uv, color));
         }
 
         index += 1;
@@ -387,22 +389,38 @@ fn generate_sector_wall(
                         ]
                     };
 
+                    let pos1 = Vec3::new(end.x, sector.floor_height, end.y);
+                    let pos2 = Vec3::new(end.x, sector.ceiling_height, end.y);
+                    let pos3 =
+                        Vec3::new(start.x, sector.ceiling_height, start.y);
+
+                    let a = pos1;
+                    let b = pos3;
+                    let c = pos2;
+
+                    let normal = ((b - a).cross(c - a)).normalize();
+
+                    let x = (normal.x * 0.5) + 0.5;
+                    let y = (normal.y * 0.5) + 0.5;
+                    let z = (normal.z * 0.5) + 0.5;
+                    let color = Vec4::new(x, y, z, 1.0);
+
                     let pos = Vec3::new(start.x, sector.floor_height, start.y);
                     let uv = uvs[0]; // 3
-                    wall.push(Vertex::new(pos, uv, color));
+                    wall.push(Vertex::new(pos, normal, uv, color));
 
                     let pos = Vec3::new(end.x, sector.floor_height, end.y);
                     let uv = uvs[1]; // 0
-                    wall.push(Vertex::new(pos, uv, color));
+                    wall.push(Vertex::new(pos, normal, uv, color));
 
                     let pos = Vec3::new(end.x, sector.ceiling_height, end.y);
                     let uv = uvs[2]; // 1
-                    wall.push(Vertex::new(pos, uv, color));
+                    wall.push(Vertex::new(pos, normal, uv, color));
 
                     let pos =
                         Vec3::new(start.x, sector.ceiling_height, start.y);
                     let uv = uvs[3]; // 2
-                    wall.push(Vertex::new(pos, uv, color));
+                    wall.push(Vertex::new(pos, normal, uv, color));
                 }
 
                 mesh.add_vertices(wall, false, false);
@@ -438,31 +456,38 @@ fn generate_sector_wall(
                         ]
                     };
 
-                    let pos0 = Vec3::new(start.x, front, start.y);
-                    let pos2 = Vec3::new(end.x, front, end.y);
-                    let pos1 = Vec3::new(end.x, back, end.y);
+                    let pos1 = Vec3::new(end.x, front, end.y);
+                    let pos2 = Vec3::new(end.x, back, end.y);
+                    let pos3 = Vec3::new(start.x, back, start.y);
 
-                    let normal = ((pos1 - pos0) * (pos2 - pos0)).normalize();
-                    println!(
-                        "Normal: {}, {}, {}",
-                        normal.x, normal.y, normal.z
-                    );
+                    let (a, b, c) = if clockwise {
+                        (pos1, pos2, pos3)
+                    } else {
+                        (pos1, pos3, pos2)
+                    };
+
+                    let normal = ((b - a).cross(c - a)).normalize();
+
+                    let x = (normal.x * 0.5) + 0.5;
+                    let y = (normal.y * 0.5) + 0.5;
+                    let z = (normal.z * 0.5) + 0.5;
+                    let color = Vec4::new(x, y, z, 1.0);
 
                     let pos = Vec3::new(start.x, front, start.y);
                     let uv = uvs[0];
-                    verts.push(Vertex::new(pos, uv, color));
+                    verts.push(Vertex::new(pos, normal, uv, color));
 
                     let pos = Vec3::new(end.x, front, end.y);
                     let uv = uvs[1];
-                    verts.push(Vertex::new(pos, uv, color));
+                    verts.push(Vertex::new(pos, normal, uv, color));
 
                     let pos = Vec3::new(end.x, back, end.y);
                     let uv = uvs[2];
-                    verts.push(Vertex::new(pos, uv, color));
+                    verts.push(Vertex::new(pos, normal, uv, color));
 
                     let pos = Vec3::new(start.x, back, start.y);
                     let uv = uvs[3];
-                    verts.push(Vertex::new(pos, uv, color));
+                    verts.push(Vertex::new(pos, normal, uv, color));
 
                     index += 1;
                     if index >= COLOR_TABLE.len() {
@@ -493,19 +518,19 @@ fn generate_sector_wall(
                     let pos =
                         Vec3::new(start.x, front, start.y) + normal * diff;
                     let uv = Vec2::new(0.0, 0.0);
-                    verts.push(Vertex::new(pos, uv, color));
+                    verts.push(Vertex::new(pos, normal, uv, color));
 
                     let pos = Vec3::new(end.x, front, end.y) + normal * diff;
                     let uv = Vec2::new(0.0, 0.0);
-                    verts.push(Vertex::new(pos, uv, color));
+                    verts.push(Vertex::new(pos, normal, uv, color));
 
                     let pos = Vec3::new(end.x, back, end.y);
                     let uv = Vec2::new(0.0, 0.0);
-                    verts.push(Vertex::new(pos, uv, color));
+                    verts.push(Vertex::new(pos, normal, uv, color));
 
                     let pos = Vec3::new(start.x, back, start.y);
                     let uv = Vec2::new(0.0, 0.0);
-                    verts.push(Vertex::new(pos, uv, color));
+                    verts.push(Vertex::new(pos, normal, uv, color));
 
                     verts
                 };
@@ -1271,6 +1296,22 @@ impl Gltf {
         self.create_buffer_view(start, length)
     }
 
+    fn add_normal_buffer(&mut self, normals: &[Vec3]) -> BufferViewId {
+        let start = self.data_buffer.len();
+
+        for normal in normals {
+            self.data_buffer.extend_from_slice(&normal.x.to_le_bytes());
+            self.data_buffer.extend_from_slice(&normal.y.to_le_bytes());
+            self.data_buffer.extend_from_slice(&normal.z.to_le_bytes());
+        }
+
+        let end = self.data_buffer.len();
+
+        let length = end - start;
+
+        self.create_buffer_view(start, length)
+    }
+
     fn add_color_buffer(&mut self, colors: &[Vec4]) -> BufferViewId {
         let start = self.data_buffer.len();
 
@@ -1362,6 +1403,18 @@ impl Gltf {
             DataTyp::Vec4f,
         );
 
+        let normals = mesh
+            .vertex_buffer
+            .iter()
+            .map(|v| v.normal)
+            .collect::<Vec<Vec3>>();
+        let normal_buffer_view = self.add_normal_buffer(&normals);
+        let normal_buffer_access = self.create_accessor(
+            normal_buffer_view,
+            normals.len(),
+            DataTyp::Vec3f,
+        );
+
         let index_buffer_view = self.add_index_buffer(&mesh.index_buffer);
         let index_buffer_access = self.create_accessor(
             index_buffer_view,
@@ -1371,6 +1424,7 @@ impl Gltf {
 
         let mut attributes = HashMap::new();
         attributes.insert("POSITION".to_string(), vertex_buffer_access);
+        attributes.insert("NORMAL".to_string(), normal_buffer_access);
         attributes.insert("COLOR_0".to_string(), color_buffer_access);
 
         let primitive = GltfPrimitive {

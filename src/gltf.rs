@@ -117,12 +117,18 @@ impl Vec4 {
 #[derive(Clone, Debug)]
 pub struct Vertex {
     pub pos: Vec3,
+    pub normal: Vec3,
     pub uv: Vec2,
     pub color: Vec4,
 }
 
 impl Vertex {
-    pub fn new(pos: Vec3, uv: Vec2, color: Vec4) -> Self {
-        Self { pos, uv, color }
+    pub fn new(pos: Vec3, normal: Vec3, uv: Vec2, color: Vec4) -> Self {
+        Self {
+            pos,
+            normal,
+            uv,
+            color,
+        }
     }
 }
