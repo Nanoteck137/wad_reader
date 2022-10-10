@@ -1,9 +1,15 @@
 //! Module to handle WAD files
 
+#![allow(dead_code)]
+
 pub const LINEDEF_FLAG_IMPASSABLE: usize = 0x0001;
 pub const LINEDEF_FLAG_TWO_SIDED: usize = 0x0004;
-pub const LINEDEF_FLAG_SHOW_MAP: usize = 0x0080;
-pub const LINEDEF_FLAG_DONT_SHOW_MAP: usize = 0x0100;
+pub const LINEDEF_FLAG_UPPER_TEXTURE_UNPEGGED: usize = 0x0008;
+pub const LINEDEF_FLAG_LOWER_TEXTURE_UNPEGGED: usize = 0x0010;
+pub const LINEDEF_FLAG_SECRET: usize = 0x0020;
+pub const LINEDEF_FLAG_BLOCKS_SOUND: usize = 0x0020;
+pub const LINEDEF_FLAG_NEVER_SHOW_ON_AUTOMAP: usize = 0x0080;
+pub const LINEDEF_FLAG_ALWAYS_SHOWS_ON_AUTOMAP: usize = 0x0100;
 
 #[derive(Copy, Clone, Debug)]
 pub enum Error {

@@ -327,12 +327,45 @@ fn generate_sector_ceiling(
     mesh
 }
 
+fn update_uv(
+    verts: &mut Vec<Vertex>,
+    texture: &Texture,
+    length: f32,
+    x_offset: f32,
+    y_offset: f32,
+    top: f32,
+    bottom: f32,
+    lower_peg: bool,
+) {
+    assert_eq!(verts.len(), 4);
+
+    let height = (top - bottom).round();
+
+    let mut y1 = y_offset;
+    let mut y2 = y_offset + height;
+
+    if lower_peg {
+        y2 = y_offset + texture.height as f32;
+        y1 = y2 - height;
+    }
+
+    let dim = Vec2::new(texture.width as f32, texture.height as f32);
+
+    verts[0].uv = Vec2::new(x_offset, y1 + (top - verts[0].pos.y)) / dim;
+    verts[1].uv = Vec2::new(x_offset, y2 + (bottom - verts[1].pos.y)) / dim;
+    verts[2].uv =
+        Vec2::new(x_offset + length, y2 + (bottom - verts[2].pos.y)) / dim;
+    verts[3].uv =
+        Vec2::new(x_offset + length, y1 + (top - verts[3].pos.y)) / dim;
+}
+
 fn gen_normal_wall(
     wad: &wad::Wad,
     texture_loader: &TextureLoader,
     texture_queue: &TextureQueue,
     texture_id: usize,
     sector: &wad::Sector,
+    linedef: &wad::Linedef,
     sidedef: &wad::Sidedef,
     start: wad::Vertex,
     end: wad::Vertex,
@@ -365,33 +398,24 @@ fn gen_normal_wall(
 
     let length = (dx * dx + dy * dy).sqrt();
 
-    let lower_peg = false;
-    let ceiling = sector.ceiling_height;
-    let floor = sector.floor_height;
+    let uv = Vec2::new(0.0, 0.0);
+    verts.push(Vertex::new(pos0, normal, uv, color));
+    verts.push(Vertex::new(pos1, normal, uv, color));
+    verts.push(Vertex::new(pos2, normal, uv, color));
+    verts.push(Vertex::new(pos3, normal, uv, color));
 
-    let height = (ceiling - floor).round();
-
-    let x_offset = sidedef.x_offset as f32;
-    let y_offset = sidedef.y_offset as f32;
-
-    let (y1, y2) = if lower_peg {
-        let v = y_offset + texture.height as f32;
-        (v - height, v)
-    } else {
-        (y_offset, y_offset + height)
-    };
-
-    let dim = Vec2::new(texture.width as f32, texture.height as f32);
-
-    let uv0 = Vec2::new(x_offset, y1 + (ceiling - pos0.y)) / dim;
-    let uv1 = Vec2::new(x_offset, y2 + (floor - pos1.y)) / dim;
-    let uv2 = Vec2::new(x_offset + length, y2 + (floor - pos2.y)) / dim;
-    let uv3 = Vec2::new(x_offset + length, y1 + (ceiling - pos3.y)) / dim;
-
-    verts.push(Vertex::new(pos0, normal, uv0, color));
-    verts.push(Vertex::new(pos1, normal, uv1, color));
-    verts.push(Vertex::new(pos2, normal, uv2, color));
-    verts.push(Vertex::new(pos3, normal, uv3, color));
+    let lower_peg = linedef.flags & wad::LINEDEF_FLAG_LOWER_TEXTURE_UNPEGGED
+        == wad::LINEDEF_FLAG_LOWER_TEXTURE_UNPEGGED;
+    update_uv(
+        &mut verts,
+        &texture,
+        length,
+        sidedef.x_offset as f32,
+        sidedef.y_offset as f32,
+        sector.ceiling_height,
+        sector.floor_height,
+        lower_peg,
+    );
 
     verts
 }
@@ -401,12 +425,15 @@ fn gen_diff_wall(
     texture_loader: &TextureLoader,
     texture_queue: &TextureQueue,
     texture_id: usize,
+    linedef: &wad::Linedef,
     sidedef: &wad::Sidedef,
+    front_sector: &wad::Sector,
+    back_sector: &wad::Sector,
     start: wad::Vertex,
     end: wad::Vertex,
     front: f32,
     back: f32,
-    clockwise: bool,
+    lower_quad: bool,
 ) -> Vec<Vertex> {
     let mut verts = Vec::new();
 
@@ -423,7 +450,7 @@ fn gen_diff_wall(
     let pos2 = Vec3::new(x2, front, y2);
     let pos3 = Vec3::new(x2, back, y2);
 
-    let (a, b, c) = if clockwise {
+    let (a, b, c) = if lower_quad {
         (pos1, pos2, pos3)
     } else {
         (pos1, pos3, pos2)
@@ -439,30 +466,38 @@ fn gen_diff_wall(
 
     let length = (dx * dx + dy * dy).sqrt();
 
-    let lower_peg = true;
-    let height = (front - back).round();
+    let uv = Vec2::new(0.0, 0.0);
+    verts.push(Vertex::new(pos0, normal, uv, color));
+    verts.push(Vertex::new(pos1, normal, uv, color));
+    verts.push(Vertex::new(pos2, normal, uv, color));
+    verts.push(Vertex::new(pos3, normal, uv, color));
 
-    let x_offset = sidedef.x_offset as f32;
-    let y_offset = sidedef.y_offset as f32;
+    if lower_quad {
+        let x_offset = sidedef.x_offset as f32;
+        let mut y_offset = sidedef.y_offset as f32;
+        if linedef.flags & wad::LINEDEF_FLAG_LOWER_TEXTURE_UNPEGGED
+            == wad::LINEDEF_FLAG_LOWER_TEXTURE_UNPEGGED
+        {
+            y_offset += front_sector.ceiling_height - back_sector.floor_height;
+        }
 
-    let (y1, y2) = if lower_peg {
-        let v = y_offset + texture.height as f32;
-        (v - height, v)
+        update_uv(
+            &mut verts, &texture, length, x_offset, y_offset, back, front,
+            false,
+        );
     } else {
-        (y_offset, y_offset + height)
-    };
+        let x_offset = sidedef.x_offset as f32;
+        let y_offset = sidedef.y_offset as f32;
 
-    let dim = Vec2::new(texture.width as f32, texture.height as f32);
-
-    let uv0 = Vec2::new(x_offset, y1 + (front - pos0.y)) / dim;
-    let uv1 = Vec2::new(x_offset, y2 + (back - pos1.y)) / dim;
-    let uv2 = Vec2::new(x_offset + length, y2 + (back - pos2.y)) / dim;
-    let uv3 = Vec2::new(x_offset + length, y1 + (front - pos3.y)) / dim;
-
-    verts.push(Vertex::new(pos0, normal, uv0, color));
-    verts.push(Vertex::new(pos1, normal, uv1, color));
-    verts.push(Vertex::new(pos2, normal, uv2, color));
-    verts.push(Vertex::new(pos3, normal, uv3, color));
+        let upper_peg = linedef.flags
+            & wad::LINEDEF_FLAG_UPPER_TEXTURE_UNPEGGED
+            == wad::LINEDEF_FLAG_UPPER_TEXTURE_UNPEGGED;
+        println!("Upper: {}", upper_peg);
+        update_uv(
+            &mut verts, &texture, length, x_offset, y_offset, front, back,
+            !upper_peg,
+        );
+    }
 
     verts
 }
@@ -531,10 +566,8 @@ fn generate_sector_wall(
                 let start = map.vertex(line.start_vertex);
                 let end = map.vertex(line.end_vertex);
 
-                if linedef.flags & wad::LINEDEF_FLAG_IMPASSABLE
-                    == wad::LINEDEF_FLAG_IMPASSABLE
-                    && linedef.flags & wad::LINEDEF_FLAG_TWO_SIDED
-                        != wad::LINEDEF_FLAG_TWO_SIDED
+                if linedef.flags & wad::LINEDEF_FLAG_TWO_SIDED
+                    != wad::LINEDEF_FLAG_TWO_SIDED
                 {
                     if let Some(sidedef) = linedef.front_sidedef {
                         let sidedef = map.sidedefs[sidedef];
@@ -551,6 +584,7 @@ fn generate_sector_wall(
                             texture_queue,
                             texture_id,
                             sector,
+                            &linedef,
                             &sidedef,
                             start,
                             end,
@@ -607,12 +641,15 @@ fn generate_sector_wall(
                             texture_loader,
                             texture_queue,
                             texture_id,
+                            &linedef,
                             &front_sidedef,
+                            front_sector,
+                            back_sector,
                             start,
                             end,
                             front,
                             back,
-                            false,
+                            true,
                         );
 
                         let mesh =
@@ -630,13 +667,6 @@ fn generate_sector_wall(
                     if front_sector.ceiling_height
                         != back_sector.ceiling_height
                     {
-                        println!(
-                            "Upper: {:?}",
-                            std::str::from_utf8(
-                                &front_sidedef.upper_texture_name
-                            )
-                        );
-
                         let front = front_sector.ceiling_height;
                         let back = back_sector.ceiling_height;
 
@@ -651,12 +681,15 @@ fn generate_sector_wall(
                             texture_loader,
                             texture_queue,
                             texture_id,
+                            &linedef,
                             &front_sidedef,
+                            front_sector,
+                            back_sector,
                             start,
                             end,
                             front,
                             back,
-                            true,
+                            false,
                         );
 
                         let mesh =
@@ -669,8 +702,6 @@ fn generate_sector_wall(
 
                         mesh.add_vertices(verts, true, false)
                     }
-
-                    println!();
                 }
             }
         }
