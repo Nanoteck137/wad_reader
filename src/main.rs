@@ -366,10 +366,10 @@ fn gen_normal_wall(
     let length = (dx * dx + dy * dy).sqrt();
 
     let lower_peg = false;
-    let ceiling1 = sector.ceiling_height;
-    let floor1 = sector.floor_height;
+    let ceiling = sector.ceiling_height;
+    let floor = sector.floor_height;
 
-    let height = (ceiling1 - floor1).round();
+    let height = (ceiling - floor).round();
 
     let x_offset = sidedef.x_offset as f32;
     let y_offset = sidedef.y_offset as f32;
@@ -383,10 +383,10 @@ fn gen_normal_wall(
 
     let dim = Vec2::new(texture.width as f32, texture.height as f32);
 
-    let uv0 = Vec2::new(x_offset, y1 + (ceiling1 - pos0.y)) / dim;
-    let uv1 = Vec2::new(x_offset, y2 + (floor1 - pos1.y)) / dim;
-    let uv2 = Vec2::new(x_offset + length, y2 + (floor1 - pos2.y)) / dim;
-    let uv3 = Vec2::new(x_offset + length, y1 + (ceiling1 - pos3.y)) / dim;
+    let uv0 = Vec2::new(x_offset, y1 + (ceiling - pos0.y)) / dim;
+    let uv1 = Vec2::new(x_offset, y2 + (floor - pos1.y)) / dim;
+    let uv2 = Vec2::new(x_offset + length, y2 + (floor - pos2.y)) / dim;
+    let uv3 = Vec2::new(x_offset + length, y1 + (ceiling - pos3.y)) / dim;
 
     verts.push(Vertex::new(pos0, normal, uv0, color));
     verts.push(Vertex::new(pos1, normal, uv1, color));
