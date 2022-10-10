@@ -400,97 +400,25 @@ fn gen_normal_wall(
     texture_loader: &TextureLoader,
     texture_queue: &TextureQueue,
     texture_id: usize,
-    x_offset: i16,
-    y_offset: i16,
     sector: &wad::Sector,
+    sidedef: &wad::Sidedef,
     start: wad::Vertex,
     end: wad::Vertex,
-    sidedef: &wad::Sidedef,
 ) -> Vec<Vertex> {
     let mut verts = Vec::new();
-
-    let dx = (end.x - start.x).abs();
-    let dy = (end.y - start.y).abs();
-
-    // Normalize the "vector"
-    let length = (dx * dx + dy * dy).sqrt();
-    let dx = dx / length;
-    let dy = dy / length;
 
     let name = texture_queue.get_name_from_id(texture_id).unwrap();
     let texture = texture_loader.load(wad, name).unwrap();
 
-    let w = 1.0 / texture.width as f32;
-    let h = 1.0 / texture.height as f32;
+    let x1 = start.x;
+    let y1 = start.y;
+    let x2 = end.x;
+    let y2 = end.y;
 
-    let dim = Vec2::new(w, -h);
-    let offset = Vec2::new(x_offset as f32, y_offset as f32);
-
-    // TODO(patrik): We might need to revisit this and change
-    // the order
-    let uvs = if dx > dy {
-        [
-            (Vec2::new(start.x, sector.floor_height) + offset) * dim,
-            (Vec2::new(end.x, sector.floor_height) + offset) * dim,
-            (Vec2::new(end.x, sector.ceiling_height) + offset) * dim,
-            (Vec2::new(start.x, sector.ceiling_height) + offset) * dim,
-        ]
-    } else {
-        [
-            (Vec2::new(end.y, sector.floor_height) + offset) * dim,
-            (Vec2::new(start.y, sector.floor_height) + offset) * dim,
-            (Vec2::new(start.y, sector.ceiling_height) + offset) * dim,
-            (Vec2::new(end.y, sector.ceiling_height) + offset) * dim,
-        ]
-    };
-
-    // let pos0 = Vec3::new(start.x, sector.floor_height, start.y);
-    // let pos1 = Vec3::new(end.x, sector.floor_height, end.y);
-    // let pos2 = Vec3::new(end.x, sector.ceiling_height, end.y);
-    // let pos3 = Vec3::new(start.x, sector.ceiling_height, start.y);
-    //
-    // let x_mult = 1.0 / (w * 1.0);
-    // let y_mult = 1.0 / (h * 1.0);
-    //
-    // let o_left = sidedef.x_offset as f32;
-    // let o_top = sidedef.y_offset as f32;
-    // let h_top = sector.ceiling_height;
-    // let h_bottom = sector.floor_height;
-    // let height = (h_top - h_bottom).round();
-    //
-    // let y1 = o_top;
-    // let y2 = o_top + height;
-    //
-    // // if (pegbottom) {
-    // //     y2 = o_top + tex_info.size.y * sy;
-    // //     y1 = y2 - height;
-    // // }
-    //
-    // let uv0 = Vec2::new(
-    //     o_left * x_mult,
-    //     (y1 * y_mult) + ((h_top - pos0.y) * y_mult),
-    // );
-    //
-    // let uv1 = Vec2::new(
-    //     o_left * x_mult,
-    //     (y2 * y_mult) + ((h_bottom - pos1.y) * y_mult),
-    // );
-    //
-    // let uv2 = Vec2::new(
-    //     (o_left + length) * x_mult,
-    //     (y2 * y_mult) + ((h_bottom - pos2.y) * y_mult),
-    // );
-    //
-    // let uv3 = Vec2::new(
-    //     (o_left + length) * x_mult,
-    //     (y1 * y_mult) + ((h_top - pos3.y) * y_mult),
-    // );
-    //
-    // let uvs = [uv0, uv1, uv2, uv3];
-
-    let pos1 = Vec3::new(end.x, sector.floor_height, end.y);
-    let pos2 = Vec3::new(end.x, sector.ceiling_height, end.y);
-    let pos3 = Vec3::new(start.x, sector.ceiling_height, start.y);
+    let pos0 = Vec3::new(x1, sector.ceiling_height, y1);
+    let pos1 = Vec3::new(x1, sector.floor_height, y1);
+    let pos2 = Vec3::new(x2, sector.floor_height, y2);
+    let pos3 = Vec3::new(x2, sector.ceiling_height, y2);
 
     let a = pos1;
     let b = pos3;
@@ -498,32 +426,40 @@ fn gen_normal_wall(
 
     let normal = ((b - a).cross(c - a)).normalize();
 
-    // let x = (normal.x * 0.5) + 0.5;
-    // let y = (normal.y * 0.5) + 0.5;
-    // let z = (normal.z * 0.5) + 0.5;
-    // let color = Vec4::new(x, y, z, 1.0);
-
     let color = Vec4::new(1.0, 1.0, 1.0, 1.0);
 
-    let pos = Vec3::new(start.x, sector.floor_height, start.y);
-    let uv = uvs[0]; // 3
-                     // let color = Vec4::new(uv.x, uv.y, 0.0, 1.0);
-    verts.push(Vertex::new(pos, normal, uv, color));
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
 
-    let pos = Vec3::new(end.x, sector.floor_height, end.y);
-    let uv = uvs[1]; // 0
-                     // let color = Vec4::new(uv.x, uv.y, 0.0, 1.0);
-    verts.push(Vertex::new(pos, normal, uv, color));
+    let length = (dx * dx + dy * dy).sqrt();
 
-    let pos = Vec3::new(end.x, sector.ceiling_height, end.y);
-    let uv = uvs[2]; // 1
-                     // let color = Vec4::new(uv.x, uv.y, 0.0, 1.0);
-    verts.push(Vertex::new(pos, normal, uv, color));
+    let lower_peg = true;
+    let ceiling1 = sector.ceiling_height;
+    let floor1 = sector.floor_height;
 
-    let pos = Vec3::new(start.x, sector.ceiling_height, start.y);
-    let uv = uvs[3]; // 2
-                     // let color = Vec4::new(uv.x, uv.y, 0.0, 1.0);
-    verts.push(Vertex::new(pos, normal, uv, color));
+    let height = (ceiling1 - floor1).round();
+
+    let x_offset = sidedef.x_offset as f32;
+    let y_offset = sidedef.y_offset as f32;
+
+    let (y1, y2) = if lower_peg {
+        let v = y_offset + texture.height as f32;
+        (v - height, v)
+    } else {
+        (y_offset, y_offset + height)
+    };
+
+    let dim = Vec2::new(texture.width as f32, texture.height as f32);
+
+    let uv0 = Vec2::new(x_offset, y1 + (ceiling1 - pos0.y)) / dim;
+    let uv1 = Vec2::new(x_offset, y2 + (floor1 - pos1.y)) / dim;
+    let uv2 = Vec2::new(x_offset + length, y2 + (floor1 - pos2.y)) / dim;
+    let uv3 = Vec2::new(x_offset + length, y1 + (ceiling1 - pos3.y)) / dim;
+
+    verts.push(Vertex::new(pos0, normal, uv0, color));
+    verts.push(Vertex::new(pos1, normal, uv1, color));
+    verts.push(Vertex::new(pos2, normal, uv2, color));
+    verts.push(Vertex::new(pos3, normal, uv3, color));
 
     verts
 }
@@ -533,6 +469,7 @@ fn gen_diff_wall(
     texture_loader: &TextureLoader,
     texture_queue: &TextureQueue,
     texture_id: usize,
+    sidedef: &wad::Sidedef,
     start: wad::Vertex,
     end: wad::Vertex,
     front: f32,
@@ -541,43 +478,18 @@ fn gen_diff_wall(
 ) -> Vec<Vertex> {
     let mut verts = Vec::new();
 
-    let dx = (end.x - start.x).abs();
-    let dy = (end.y - start.y).abs();
-
-    // Normalize the "vector"
-    let mag = (dx * dx + dy * dy).sqrt();
-    let dx = dx / mag;
-    let dy = dy / mag;
-
     let name = texture_queue.get_name_from_id(texture_id).unwrap();
     let texture = texture_loader.load(wad, name).unwrap();
 
-    let w = 1.0 / texture.width as f32;
-    let h = 1.0 / texture.height as f32;
+    let x1 = start.x;
+    let y1 = start.y;
+    let x2 = end.x;
+    let y2 = end.y;
 
-    let dim = Vec2::new(w, -h);
-
-    // TODO(patrik): We might need to revisit this and change
-    // the order
-    let uvs = if dx > dy {
-        [
-            Vec2::new(start.x, front) * dim,
-            Vec2::new(end.x, front) * dim,
-            Vec2::new(end.x, back) * dim,
-            Vec2::new(start.x, back) * dim,
-        ]
-    } else {
-        [
-            Vec2::new(end.y, front) * dim,
-            Vec2::new(start.y, front) * dim,
-            Vec2::new(start.y, back) * dim,
-            Vec2::new(end.y, back) * dim,
-        ]
-    };
-
-    let pos1 = Vec3::new(end.x, front, end.y);
-    let pos2 = Vec3::new(end.x, back, end.y);
-    let pos3 = Vec3::new(start.x, back, start.y);
+    let pos0 = Vec3::new(x1, back, y1);
+    let pos1 = Vec3::new(x1, front, y1);
+    let pos2 = Vec3::new(x2, front, y2);
+    let pos3 = Vec3::new(x2, back, y2);
 
     let (a, b, c) = if clockwise {
         (pos1, pos2, pos3)
@@ -585,30 +497,40 @@ fn gen_diff_wall(
         (pos1, pos3, pos2)
     };
 
+    // TODO(patrik): Check the normal
     let normal = ((b - a).cross(c - a)).normalize();
-
-    // let x = (normal.x * 0.5) + 0.5;
-    // let y = (normal.y * 0.5) + 0.5;
-    // let z = (normal.z * 0.5) + 0.5;
-    // let color = Vec4::new(x, y, z, 1.0);
 
     let color = Vec4::new(1.0, 1.0, 1.0, 1.0);
 
-    let pos = Vec3::new(start.x, front, start.y);
-    let uv = uvs[0];
-    verts.push(Vertex::new(pos, normal, uv, color));
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
 
-    let pos = Vec3::new(end.x, front, end.y);
-    let uv = uvs[1];
-    verts.push(Vertex::new(pos, normal, uv, color));
+    let length = (dx * dx + dy * dy).sqrt();
 
-    let pos = Vec3::new(end.x, back, end.y);
-    let uv = uvs[2];
-    verts.push(Vertex::new(pos, normal, uv, color));
+    let lower_peg = false;
+    let height = (front - back).round();
 
-    let pos = Vec3::new(start.x, back, start.y);
-    let uv = uvs[3];
-    verts.push(Vertex::new(pos, normal, uv, color));
+    let x_offset = sidedef.x_offset as f32;
+    let y_offset = sidedef.y_offset as f32;
+
+    let (y1, y2) = if lower_peg {
+        let v = y_offset + texture.height as f32;
+        (v - height, v)
+    } else {
+        (y_offset, y_offset + height)
+    };
+
+    let dim = Vec2::new(texture.width as f32, texture.height as f32);
+
+    let uv0 = Vec2::new(x_offset, y1 + (front - pos0.y)) / dim;
+    let uv1 = Vec2::new(x_offset, y2 + (back - pos1.y)) / dim;
+    let uv2 = Vec2::new(x_offset + length, y2 + (back - pos2.y)) / dim;
+    let uv3 = Vec2::new(x_offset + length, y1 + (front - pos3.y)) / dim;
+
+    verts.push(Vertex::new(pos0, normal, uv0, color));
+    verts.push(Vertex::new(pos1, normal, uv1, color));
+    verts.push(Vertex::new(pos2, normal, uv2, color));
+    verts.push(Vertex::new(pos3, normal, uv3, color));
 
     verts
 }
@@ -696,12 +618,10 @@ fn generate_sector_wall(
                             texture_loader,
                             texture_queue,
                             texture_id,
-                            sidedef.x_offset,
-                            sidedef.y_offset,
                             sector,
+                            &sidedef,
                             start,
                             end,
-                            &sidedef,
                         );
 
                         let mesh =
@@ -755,6 +675,7 @@ fn generate_sector_wall(
                             texture_loader,
                             texture_queue,
                             texture_id,
+                            &front_sidedef,
                             start,
                             end,
                             front,
@@ -798,6 +719,7 @@ fn generate_sector_wall(
                             texture_loader,
                             texture_queue,
                             texture_id,
+                            &front_sidedef,
                             start,
                             end,
                             front,
@@ -1550,7 +1472,7 @@ impl Gltf {
     fn create_sampler(&mut self, name: String) -> SamplerId {
         let id = self.samplers.len();
 
-        const NEAREST: usize = 9728;
+        const NEAREST: usize = 9984;
 
         const REPEAT: usize = 10497;
 

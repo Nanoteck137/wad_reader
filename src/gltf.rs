@@ -21,6 +21,17 @@ impl std::ops::Add<Vec2> for Vec2 {
     }
 }
 
+impl std::ops::Div<Vec2> for Vec2 {
+    type Output = Vec2;
+
+    fn div(self, rhs: Vec2) -> Vec2 {
+        let x = self.x / rhs.x;
+        let y = self.y / rhs.y;
+
+        Vec2::new(x, y)
+    }
+}
+
 impl std::ops::Div<f32> for Vec2 {
     type Output = Vec2;
 
