@@ -98,6 +98,8 @@ struct TextureLoader {
     color_map: ColorMap,
     palette: Palette,
 
+    textures: HashMap<String, Texture>,
+
     patch_start: usize,
     patch_end: usize,
     flat_start: usize,
@@ -116,9 +118,26 @@ impl TextureLoader {
         let flat_end = wad.find_dir("F_END").ok()?;
         assert!(flat_start < flat_end);
 
+        let patch_names =
+            read_patch_names(&wad).expect("Failed to load patch names");
+        // println!("Patch Names: {:#?}", patch_names);
+
+        // assert!(!wad.find_dir("TEXTURE2").is_ok());
+        let texture_defs =
+            read_texture_defs(&wad).expect("Failed to read texture defs");
+        let textures = process_texture_defs(
+            &wad,
+            &patch_names,
+            &texture_defs,
+            &color_map,
+            &palette,
+        );
+
         Some(Self {
             color_map,
             palette,
+
+            textures,
 
             patch_start,
             patch_end,
@@ -136,23 +155,29 @@ impl TextureLoader {
     }
 
     fn load(&self, wad: &Wad, name: &str) -> Option<Texture> {
-        let dir_index = wad.find_dir(name).ok()?;
+        let dir_index = wad.find_dir(name);
 
-        if self.is_patch(dir_index) {
-            println!("{} is patch", name);
-        } else if self.is_flat(dir_index) {
-            println!("{} is flat", name);
-            return read_flat_texture(
-                wad,
-                name,
-                &self.color_map,
-                &self.palette,
-            );
+        if let Some(dir_index) = dir_index.ok() {
+            if self.is_patch(dir_index) {
+                return read_patch_texture(
+                    wad,
+                    name,
+                    &self.color_map,
+                    &self.palette,
+                );
+            } else if self.is_flat(dir_index) {
+                return read_flat_texture(
+                    wad,
+                    name,
+                    &self.color_map,
+                    &self.palette,
+                );
+            } else {
+                panic!("{} is not flat or patch", name);
+            }
         } else {
-            panic!("{} is not flat or patch", name);
+            return Some(self.textures.get(&name.to_string())?.clone());
         }
-
-        None
     }
 }
 
@@ -177,15 +202,23 @@ impl TextureQueue {
         return None;
     }
 
-    fn enqueue(&mut self, name: String) -> usize {
-        println!("Enqueing Texture: {:?}", name);
+    fn get_name_from_id(&self, id: usize) -> Option<&String> {
+        self.textures.get(id)
+    }
+
+    fn enqueue(&mut self, name: String) -> Option<usize> {
+        if name == "-" {
+            return None;
+        }
+
+        // println!("Enqueing Texture: {:?}", name);
         return if let Some(index) = self.get(&name) {
-            index
+            Some(index)
         } else {
             let id = self.textures.len();
             self.textures.push(name);
 
-            id
+            Some(id)
         };
     }
 }
@@ -232,15 +265,19 @@ impl Mesh {
 struct Sector {
     floor_mesh: Mesh,
     ceiling_mesh: Mesh,
-    wall_mesh: Mesh,
+    wall_meshes: HashMap<usize, Mesh>,
 }
 
 impl Sector {
-    fn new(floor_mesh: Mesh, ceiling_mesh: Mesh, wall_mesh: Mesh) -> Self {
+    fn new(
+        floor_mesh: Mesh,
+        ceiling_mesh: Mesh,
+        wall_meshes: HashMap<usize, Mesh>,
+    ) -> Self {
         Self {
             floor_mesh,
             ceiling_mesh,
-            wall_mesh,
+            wall_meshes,
         }
     }
 }
@@ -259,38 +296,10 @@ impl Map {
     }
 }
 
-fn generate_sector_floor(
-    map: &wad::Map,
+fn queue_texture(
     texture_queue: &mut TextureQueue,
-    sector: &wad::Sector,
-) -> Mesh {
-    let mut mesh = Mesh::new();
-
-    let mut index = 0;
-
-    for sub_sector in &sector.sub_sectors {
-        let mut vertices = Vec::new();
-
-        for segment in 0..sub_sector.count {
-            let segment = map.segments[sub_sector.start + segment];
-            let start = map.vertex(segment.start_vertex);
-
-            let pos = Vec3::new(start.x, sector.floor_height, start.y);
-            let uv = Vec2::new(start.x, start.y);
-            let color = COLOR_TABLE[index];
-            let normal = Vec3::new(0.0, 1.0, 0.0);
-            vertices.push(Vertex::new(pos, normal, uv, color));
-        }
-
-        index += 1;
-        if index >= COLOR_TABLE.len() {
-            index = 0;
-        }
-
-        mesh.add_vertices(vertices, true, true);
-    }
-
-    let texture_name = sector.floor_texture_name;
+    texture_name: [u8; 8],
+) -> Option<usize> {
     let null_pos = texture_name
         .iter()
         .position(|&c| c == 0)
@@ -300,17 +309,68 @@ fn generate_sector_floor(
         .expect("Failed to convert floor texture name to str");
     let texture_name = String::from(texture_name);
 
-    let texture_id = texture_queue.enqueue(texture_name);
+    texture_queue.enqueue(texture_name)
+}
 
-    mesh.texture_id = Some(texture_id);
+fn generate_sector_floor(
+    wad: &wad::Wad,
+    map: &wad::Map,
+    texture_loader: &TextureLoader,
+    texture_queue: &mut TextureQueue,
+    sector: &wad::Sector,
+) -> Mesh {
+    let mut mesh = Mesh::new();
+
+    let texture_id = queue_texture(texture_queue, sector.floor_texture_name);
+    mesh.texture_id = texture_id;
+
+    let name = texture_queue.get_name_from_id(texture_id.unwrap()).unwrap();
+    let texture = texture_loader.load(wad, name).unwrap();
+
+    let w = 1.0 / texture.width as f32;
+    let h = 1.0 / texture.height as f32;
+
+    let dim = Vec2::new(w, -h);
+
+    for sub_sector in &sector.sub_sectors {
+        let mut vertices = Vec::new();
+
+        for segment in 0..sub_sector.count {
+            let segment = map.segments[sub_sector.start + segment];
+            let start = map.vertex(segment.start_vertex);
+
+            let pos = Vec3::new(start.x, sector.floor_height, start.y);
+            let uv = Vec2::new(start.x, start.y) * dim;
+            let color = Vec4::new(1.0, 1.0, 1.0, 1.0);
+            let normal = Vec3::new(0.0, 1.0, 0.0);
+            vertices.push(Vertex::new(pos, normal, uv, color));
+        }
+
+        mesh.add_vertices(vertices, true, true);
+    }
 
     mesh
 }
 
-fn generate_sector_ceiling(map: &wad::Map, sector: &wad::Sector) -> Mesh {
+fn generate_sector_ceiling(
+    wad: &wad::Wad,
+    map: &wad::Map,
+    texture_loader: &TextureLoader,
+    texture_queue: &mut TextureQueue,
+    sector: &wad::Sector,
+) -> Mesh {
     let mut mesh = Mesh::new();
 
-    let mut index = 0;
+    let texture_id = queue_texture(texture_queue, sector.floor_texture_name);
+    mesh.texture_id = texture_id;
+
+    let name = texture_queue.get_name_from_id(texture_id.unwrap()).unwrap();
+    let texture = texture_loader.load(wad, name).unwrap();
+
+    let w = 1.0 / texture.width as f32;
+    let h = 1.0 / texture.height as f32;
+
+    let dim = Vec2::new(w, -h);
 
     for sub_sector in &sector.sub_sectors {
         let mut vertices = Vec::new();
@@ -320,220 +380,341 @@ fn generate_sector_ceiling(map: &wad::Map, sector: &wad::Sector) -> Mesh {
             let start = map.vertex(segment.start_vertex);
 
             let pos = Vec3::new(start.x, sector.ceiling_height, start.y);
-            let uv = Vec2::new(start.x, start.y);
-            let color = COLOR_TABLE[index];
+            let uv = Vec2::new(start.x, start.y) * dim;
+            let color = Vec4::new(1.0, 1.0, 1.0, 1.0);
             let normal = Vec3::new(0.0, -1.0, 0.0);
             vertices.push(Vertex::new(pos, normal, uv, color));
-        }
-
-        index += 1;
-        if index >= COLOR_TABLE.len() {
-            index = 0;
         }
 
         mesh.add_vertices(vertices, false, true);
     }
 
+    let texture_id = queue_texture(texture_queue, sector.ceiling_texture_name);
+    mesh.texture_id = texture_id;
+
     mesh
 }
 
+fn gen_normal_wall(
+    wad: &wad::Wad,
+    texture_loader: &TextureLoader,
+    texture_queue: &TextureQueue,
+    texture_id: usize,
+    x_offset: i16,
+    y_offset: i16,
+    sector: &wad::Sector,
+    start: wad::Vertex,
+    end: wad::Vertex,
+    sidedef: &wad::Sidedef,
+) -> Vec<Vertex> {
+    let mut verts = Vec::new();
+
+    let dx = (end.x - start.x).abs();
+    let dy = (end.y - start.y).abs();
+
+    // Normalize the "vector"
+    let length = (dx * dx + dy * dy).sqrt();
+    let dx = dx / length;
+    let dy = dy / length;
+
+    let name = texture_queue.get_name_from_id(texture_id).unwrap();
+    let texture = texture_loader.load(wad, name).unwrap();
+
+    let w = 1.0 / texture.width as f32;
+    let h = 1.0 / texture.height as f32;
+
+    let dim = Vec2::new(w, -h);
+    let offset = Vec2::new(x_offset as f32, y_offset as f32);
+
+    // TODO(patrik): We might need to revisit this and change
+    // the order
+    let uvs = if dx > dy {
+        [
+            (Vec2::new(start.x, sector.floor_height) + offset) * dim,
+            (Vec2::new(end.x, sector.floor_height) + offset) * dim,
+            (Vec2::new(end.x, sector.ceiling_height) + offset) * dim,
+            (Vec2::new(start.x, sector.ceiling_height) + offset) * dim,
+        ]
+    } else {
+        [
+            (Vec2::new(end.y, sector.floor_height) + offset) * dim,
+            (Vec2::new(start.y, sector.floor_height) + offset) * dim,
+            (Vec2::new(start.y, sector.ceiling_height) + offset) * dim,
+            (Vec2::new(end.y, sector.ceiling_height) + offset) * dim,
+        ]
+    };
+
+    // let pos0 = Vec3::new(start.x, sector.floor_height, start.y);
+    // let pos1 = Vec3::new(end.x, sector.floor_height, end.y);
+    // let pos2 = Vec3::new(end.x, sector.ceiling_height, end.y);
+    // let pos3 = Vec3::new(start.x, sector.ceiling_height, start.y);
+    //
+    // let x_mult = 1.0 / (w * 1.0);
+    // let y_mult = 1.0 / (h * 1.0);
+    //
+    // let o_left = sidedef.x_offset as f32;
+    // let o_top = sidedef.y_offset as f32;
+    // let h_top = sector.ceiling_height;
+    // let h_bottom = sector.floor_height;
+    // let height = (h_top - h_bottom).round();
+    //
+    // let y1 = o_top;
+    // let y2 = o_top + height;
+    //
+    // // if (pegbottom) {
+    // //     y2 = o_top + tex_info.size.y * sy;
+    // //     y1 = y2 - height;
+    // // }
+    //
+    // let uv0 = Vec2::new(
+    //     o_left * x_mult,
+    //     (y1 * y_mult) + ((h_top - pos0.y) * y_mult),
+    // );
+    //
+    // let uv1 = Vec2::new(
+    //     o_left * x_mult,
+    //     (y2 * y_mult) + ((h_bottom - pos1.y) * y_mult),
+    // );
+    //
+    // let uv2 = Vec2::new(
+    //     (o_left + length) * x_mult,
+    //     (y2 * y_mult) + ((h_bottom - pos2.y) * y_mult),
+    // );
+    //
+    // let uv3 = Vec2::new(
+    //     (o_left + length) * x_mult,
+    //     (y1 * y_mult) + ((h_top - pos3.y) * y_mult),
+    // );
+    //
+    // let uvs = [uv0, uv1, uv2, uv3];
+
+    let pos1 = Vec3::new(end.x, sector.floor_height, end.y);
+    let pos2 = Vec3::new(end.x, sector.ceiling_height, end.y);
+    let pos3 = Vec3::new(start.x, sector.ceiling_height, start.y);
+
+    let a = pos1;
+    let b = pos3;
+    let c = pos2;
+
+    let normal = ((b - a).cross(c - a)).normalize();
+
+    // let x = (normal.x * 0.5) + 0.5;
+    // let y = (normal.y * 0.5) + 0.5;
+    // let z = (normal.z * 0.5) + 0.5;
+    // let color = Vec4::new(x, y, z, 1.0);
+
+    let color = Vec4::new(1.0, 1.0, 1.0, 1.0);
+
+    let pos = Vec3::new(start.x, sector.floor_height, start.y);
+    let uv = uvs[0]; // 3
+                     // let color = Vec4::new(uv.x, uv.y, 0.0, 1.0);
+    verts.push(Vertex::new(pos, normal, uv, color));
+
+    let pos = Vec3::new(end.x, sector.floor_height, end.y);
+    let uv = uvs[1]; // 0
+                     // let color = Vec4::new(uv.x, uv.y, 0.0, 1.0);
+    verts.push(Vertex::new(pos, normal, uv, color));
+
+    let pos = Vec3::new(end.x, sector.ceiling_height, end.y);
+    let uv = uvs[2]; // 1
+                     // let color = Vec4::new(uv.x, uv.y, 0.0, 1.0);
+    verts.push(Vertex::new(pos, normal, uv, color));
+
+    let pos = Vec3::new(start.x, sector.ceiling_height, start.y);
+    let uv = uvs[3]; // 2
+                     // let color = Vec4::new(uv.x, uv.y, 0.0, 1.0);
+    verts.push(Vertex::new(pos, normal, uv, color));
+
+    verts
+}
+
+fn gen_diff_wall(
+    wad: &wad::Wad,
+    texture_loader: &TextureLoader,
+    texture_queue: &TextureQueue,
+    texture_id: usize,
+    start: wad::Vertex,
+    end: wad::Vertex,
+    front: f32,
+    back: f32,
+    clockwise: bool,
+) -> Vec<Vertex> {
+    let mut verts = Vec::new();
+
+    let dx = (end.x - start.x).abs();
+    let dy = (end.y - start.y).abs();
+
+    // Normalize the "vector"
+    let mag = (dx * dx + dy * dy).sqrt();
+    let dx = dx / mag;
+    let dy = dy / mag;
+
+    let name = texture_queue.get_name_from_id(texture_id).unwrap();
+    let texture = texture_loader.load(wad, name).unwrap();
+
+    let w = 1.0 / texture.width as f32;
+    let h = 1.0 / texture.height as f32;
+
+    let dim = Vec2::new(w, -h);
+
+    // TODO(patrik): We might need to revisit this and change
+    // the order
+    let uvs = if dx > dy {
+        [
+            Vec2::new(start.x, front) * dim,
+            Vec2::new(end.x, front) * dim,
+            Vec2::new(end.x, back) * dim,
+            Vec2::new(start.x, back) * dim,
+        ]
+    } else {
+        [
+            Vec2::new(end.y, front) * dim,
+            Vec2::new(start.y, front) * dim,
+            Vec2::new(start.y, back) * dim,
+            Vec2::new(end.y, back) * dim,
+        ]
+    };
+
+    let pos1 = Vec3::new(end.x, front, end.y);
+    let pos2 = Vec3::new(end.x, back, end.y);
+    let pos3 = Vec3::new(start.x, back, start.y);
+
+    let (a, b, c) = if clockwise {
+        (pos1, pos2, pos3)
+    } else {
+        (pos1, pos3, pos2)
+    };
+
+    let normal = ((b - a).cross(c - a)).normalize();
+
+    // let x = (normal.x * 0.5) + 0.5;
+    // let y = (normal.y * 0.5) + 0.5;
+    // let z = (normal.z * 0.5) + 0.5;
+    // let color = Vec4::new(x, y, z, 1.0);
+
+    let color = Vec4::new(1.0, 1.0, 1.0, 1.0);
+
+    let pos = Vec3::new(start.x, front, start.y);
+    let uv = uvs[0];
+    verts.push(Vertex::new(pos, normal, uv, color));
+
+    let pos = Vec3::new(end.x, front, end.y);
+    let uv = uvs[1];
+    verts.push(Vertex::new(pos, normal, uv, color));
+
+    let pos = Vec3::new(end.x, back, end.y);
+    let uv = uvs[2];
+    verts.push(Vertex::new(pos, normal, uv, color));
+
+    let pos = Vec3::new(start.x, back, start.y);
+    let uv = uvs[3];
+    verts.push(Vertex::new(pos, normal, uv, color));
+
+    verts
+}
+
+fn gen_slope(
+    start: wad::Vertex,
+    end: wad::Vertex,
+    front: f32,
+    back: f32,
+    diff: f32,
+) -> Vec<Vertex> {
+    let mut verts = Vec::new();
+
+    let pos1 = Vec3::new(end.x, front, end.y);
+    let pos2 = Vec3::new(end.x, back, end.y);
+    let pos3 = Vec3::new(start.x, back, start.y);
+
+    let a = pos1;
+    let b = pos3;
+    let c = pos2;
+
+    let normal = ((b - a).cross(c - a)).normalize();
+
+    // let x = (normal.x * 0.5) + 0.5;
+    // let y = (normal.y * 0.5) + 0.5;
+    // let z = (normal.z * 0.5) + 0.5;
+    // let color = Vec4::new(x, y, z, 1.0);
+    let color = Vec4::new(1.0, 1.0, 1.0, 1.0);
+
+    let pos = Vec3::new(start.x, front, start.y) + normal * diff;
+    let uv = Vec2::new(0.0, 0.0);
+    verts.push(Vertex::new(pos, normal, uv, color));
+
+    let pos = Vec3::new(end.x, front, end.y) + normal * diff;
+    let uv = Vec2::new(0.0, 0.0);
+    verts.push(Vertex::new(pos, normal, uv, color));
+
+    let pos = Vec3::new(end.x, back, end.y);
+    let uv = Vec2::new(0.0, 0.0);
+    verts.push(Vertex::new(pos, normal, uv, color));
+
+    let pos = Vec3::new(start.x, back, start.y);
+    let uv = Vec2::new(0.0, 0.0);
+    verts.push(Vertex::new(pos, normal, uv, color));
+
+    verts
+}
+
 fn generate_sector_wall(
+    wad: &wad::Wad,
     map: &wad::Map,
+    texture_loader: &TextureLoader,
+    texture_queue: &mut TextureQueue,
     sector: &wad::Sector,
     slope_mesh: &mut Mesh,
-) -> Mesh {
-    let mut mesh = Mesh::new();
+) -> HashMap<usize, Mesh> {
+    let mut meshes: HashMap<usize, Mesh> = HashMap::new();
 
-    let mut index = 0;
     for sub_sector in &sector.sub_sectors {
         for segment in 0..sub_sector.count {
             let segment = map.segments[sub_sector.start + segment];
 
             if segment.linedef != 0xffff {
-                let mut wall = Vec::new();
                 let linedef = map.linedefs[segment.linedef];
                 let line = linedef.line;
                 let start = map.vertex(line.start_vertex);
                 let end = map.vertex(line.end_vertex);
-
-                let color = COLOR_TABLE[index];
 
                 if linedef.flags & wad::LINEDEF_FLAG_IMPASSABLE
                     == wad::LINEDEF_FLAG_IMPASSABLE
                     && linedef.flags & wad::LINEDEF_FLAG_TWO_SIDED
                         != wad::LINEDEF_FLAG_TWO_SIDED
                 {
-                    let dx = (end.x - start.x).abs();
-                    let dy = (end.y - start.y).abs();
+                    if let Some(sidedef) = linedef.front_sidedef {
+                        let sidedef = map.sidedefs[sidedef];
 
-                    // Normalize the "vector"
-                    let mag = (dx * dx + dy * dy).sqrt();
-                    let dx = dx / mag;
-                    let dy = dy / mag;
+                        let texture_id = queue_texture(
+                            texture_queue,
+                            sidedef.middle_texture_name,
+                        )
+                        .unwrap();
 
-                    // TODO(patrik): We might need to revisit this and change
-                    // the order
-                    let uvs = if dx > dy {
-                        [
-                            Vec2::new(start.x, sector.floor_height),
-                            Vec2::new(end.x, sector.floor_height),
-                            Vec2::new(end.x, sector.ceiling_height),
-                            Vec2::new(start.x, sector.ceiling_height),
-                        ]
-                    } else {
-                        [
-                            Vec2::new(end.y, sector.floor_height),
-                            Vec2::new(start.y, sector.floor_height),
-                            Vec2::new(start.y, sector.ceiling_height),
-                            Vec2::new(end.y, sector.ceiling_height),
-                        ]
-                    };
+                        let verts = gen_normal_wall(
+                            wad,
+                            texture_loader,
+                            texture_queue,
+                            texture_id,
+                            sidedef.x_offset,
+                            sidedef.y_offset,
+                            sector,
+                            start,
+                            end,
+                            &sidedef,
+                        );
 
-                    let pos1 = Vec3::new(end.x, sector.floor_height, end.y);
-                    let pos2 = Vec3::new(end.x, sector.ceiling_height, end.y);
-                    let pos3 =
-                        Vec3::new(start.x, sector.ceiling_height, start.y);
+                        let mesh =
+                            if let Some(mesh) = meshes.get_mut(&texture_id) {
+                                mesh
+                            } else {
+                                meshes.insert(texture_id, Mesh::new());
+                                meshes.get_mut(&texture_id).unwrap()
+                            };
 
-                    let a = pos1;
-                    let b = pos3;
-                    let c = pos2;
-
-                    let normal = ((b - a).cross(c - a)).normalize();
-
-                    let x = (normal.x * 0.5) + 0.5;
-                    let y = (normal.y * 0.5) + 0.5;
-                    let z = (normal.z * 0.5) + 0.5;
-                    let color = Vec4::new(x, y, z, 1.0);
-
-                    let pos = Vec3::new(start.x, sector.floor_height, start.y);
-                    let uv = uvs[0]; // 3
-                    wall.push(Vertex::new(pos, normal, uv, color));
-
-                    let pos = Vec3::new(end.x, sector.floor_height, end.y);
-                    let uv = uvs[1]; // 0
-                    wall.push(Vertex::new(pos, normal, uv, color));
-
-                    let pos = Vec3::new(end.x, sector.ceiling_height, end.y);
-                    let uv = uvs[2]; // 1
-                    wall.push(Vertex::new(pos, normal, uv, color));
-
-                    let pos =
-                        Vec3::new(start.x, sector.ceiling_height, start.y);
-                    let uv = uvs[3]; // 2
-                    wall.push(Vertex::new(pos, normal, uv, color));
-                }
-
-                mesh.add_vertices(wall, false, false);
-
-                let mut generate_wall = |front, back, clockwise| {
-                    let mut verts = Vec::new();
-
-                    let color = COLOR_TABLE[index];
-
-                    let dx = (end.x - start.x).abs();
-                    let dy = (end.y - start.y).abs();
-
-                    // Normalize the "vector"
-                    let mag = (dx * dx + dy * dy).sqrt();
-                    let dx = dx / mag;
-                    let dy = dy / mag;
-
-                    // TODO(patrik): We might need to revisit this and change
-                    // the order
-                    let uvs = if dx > dy {
-                        [
-                            Vec2::new(start.x, front),
-                            Vec2::new(end.x, front),
-                            Vec2::new(end.x, back),
-                            Vec2::new(start.x, back),
-                        ]
-                    } else {
-                        [
-                            Vec2::new(end.y, front),
-                            Vec2::new(start.y, front),
-                            Vec2::new(start.y, back),
-                            Vec2::new(end.y, back),
-                        ]
-                    };
-
-                    let pos1 = Vec3::new(end.x, front, end.y);
-                    let pos2 = Vec3::new(end.x, back, end.y);
-                    let pos3 = Vec3::new(start.x, back, start.y);
-
-                    let (a, b, c) = if clockwise {
-                        (pos1, pos2, pos3)
-                    } else {
-                        (pos1, pos3, pos2)
-                    };
-
-                    let normal = ((b - a).cross(c - a)).normalize();
-
-                    let x = (normal.x * 0.5) + 0.5;
-                    let y = (normal.y * 0.5) + 0.5;
-                    let z = (normal.z * 0.5) + 0.5;
-                    let color = Vec4::new(x, y, z, 1.0);
-
-                    let pos = Vec3::new(start.x, front, start.y);
-                    let uv = uvs[0];
-                    verts.push(Vertex::new(pos, normal, uv, color));
-
-                    let pos = Vec3::new(end.x, front, end.y);
-                    let uv = uvs[1];
-                    verts.push(Vertex::new(pos, normal, uv, color));
-
-                    let pos = Vec3::new(end.x, back, end.y);
-                    let uv = uvs[2];
-                    verts.push(Vertex::new(pos, normal, uv, color));
-
-                    let pos = Vec3::new(start.x, back, start.y);
-                    let uv = uvs[3];
-                    verts.push(Vertex::new(pos, normal, uv, color));
-
-                    index += 1;
-                    if index >= COLOR_TABLE.len() {
-                        index = 0;
+                        mesh.add_vertices(verts, false, false)
                     }
-
-                    verts
-                };
-
-                let generate_slope = |front, back, diff| {
-                    let mut verts = Vec::new();
-
-                    let pos1 = Vec3::new(end.x, front, end.y);
-                    let pos2 = Vec3::new(end.x, back, end.y);
-                    let pos3 = Vec3::new(start.x, back, start.y);
-
-                    let a = pos1;
-                    let b = pos3;
-                    let c = pos2;
-
-                    let normal = ((b - a).cross(c - a)).normalize();
-
-                    let x = (normal.x * 0.5) + 0.5;
-                    let y = (normal.y * 0.5) + 0.5;
-                    let z = (normal.z * 0.5) + 0.5;
-                    let color = Vec4::new(x, y, z, 1.0);
-
-                    let pos =
-                        Vec3::new(start.x, front, start.y) + normal * diff;
-                    let uv = Vec2::new(0.0, 0.0);
-                    verts.push(Vertex::new(pos, normal, uv, color));
-
-                    let pos = Vec3::new(end.x, front, end.y) + normal * diff;
-                    let uv = Vec2::new(0.0, 0.0);
-                    verts.push(Vertex::new(pos, normal, uv, color));
-
-                    let pos = Vec3::new(end.x, back, end.y);
-                    let uv = Vec2::new(0.0, 0.0);
-                    verts.push(Vertex::new(pos, normal, uv, color));
-
-                    let pos = Vec3::new(start.x, back, start.y);
-                    let uv = Vec2::new(0.0, 0.0);
-                    verts.push(Vertex::new(pos, normal, uv, color));
-
-                    verts
-                };
+                }
 
                 if linedef.front_sidedef.is_some()
                     && linedef.back_sidedef.is_some()
@@ -558,51 +739,124 @@ fn generate_sector_wall(
                         let diff = max - min;
 
                         if diff <= 24.0 {
-                            let verts = generate_slope(front, back, diff);
+                            let verts =
+                                gen_slope(start, end, front, back, diff);
                             slope_mesh.add_vertices(verts, false, false);
                         }
 
-                        let verts = generate_wall(front, back, false);
-                        mesh.add_vertices(verts, false, false);
+                        let texture_id = queue_texture(
+                            texture_queue,
+                            front_sidedef.lower_texture_name,
+                        )
+                        .unwrap_or(0);
+
+                        let verts = gen_diff_wall(
+                            wad,
+                            texture_loader,
+                            texture_queue,
+                            texture_id,
+                            start,
+                            end,
+                            front,
+                            back,
+                            false,
+                        );
+
+                        let mesh =
+                            if let Some(mesh) = meshes.get_mut(&texture_id) {
+                                mesh
+                            } else {
+                                meshes.insert(texture_id, Mesh::new());
+                                meshes.get_mut(&texture_id).unwrap()
+                            };
+
+                        mesh.add_vertices(verts, false, false)
                     }
 
                     // Generate the height difference
                     if front_sector.ceiling_height
                         != back_sector.ceiling_height
                     {
+                        println!(
+                            "Upper: {:?}",
+                            std::str::from_utf8(
+                                &front_sidedef.upper_texture_name
+                            )
+                        );
+
                         let front = front_sector.ceiling_height;
                         let back = back_sector.ceiling_height;
-                        let verts = generate_wall(front, back, true);
-                        mesh.add_vertices(verts, true, false);
+
+                        let texture_id = queue_texture(
+                            texture_queue,
+                            front_sidedef.upper_texture_name,
+                        )
+                        .unwrap_or(0);
+
+                        let verts = gen_diff_wall(
+                            wad,
+                            texture_loader,
+                            texture_queue,
+                            texture_id,
+                            start,
+                            end,
+                            front,
+                            back,
+                            true,
+                        );
+
+                        let mesh =
+                            if let Some(mesh) = meshes.get_mut(&texture_id) {
+                                mesh
+                            } else {
+                                meshes.insert(texture_id, Mesh::new());
+                                meshes.get_mut(&texture_id).unwrap()
+                            };
+
+                        mesh.add_vertices(verts, true, false)
                     }
+
+                    println!();
                 }
             }
         }
-
-        index += 1;
-        if index >= COLOR_TABLE.len() {
-            index = 0;
-        }
     }
 
-    mesh
+    meshes
 }
 
 fn generate_sector_from_wad(
+    wad: &wad::Wad,
     map: &wad::Map,
+    texture_loader: &TextureLoader,
     texture_queue: &mut TextureQueue,
     sector: &wad::Sector,
     slope_mesh: &mut Mesh,
 ) -> Sector {
-    let floor_mesh = generate_sector_floor(map, texture_queue, sector);
-    let ceiling_mesh = generate_sector_ceiling(map, sector);
-    let wall_mesh = generate_sector_wall(map, sector, slope_mesh);
+    let floor_mesh =
+        generate_sector_floor(wad, map, texture_loader, texture_queue, sector);
+    let ceiling_mesh = generate_sector_ceiling(
+        wad,
+        map,
+        texture_loader,
+        texture_queue,
+        sector,
+    );
+    let wall_meshes = generate_sector_wall(
+        wad,
+        map,
+        texture_loader,
+        texture_queue,
+        sector,
+        slope_mesh,
+    );
 
-    Sector::new(floor_mesh, ceiling_mesh, wall_mesh)
+    Sector::new(floor_mesh, ceiling_mesh, wall_meshes)
 }
 
 fn generate_3d_map(
     wad: &wad::Wad,
+    texture_loader: &TextureLoader,
     texture_queue: &mut TextureQueue,
     map_name: &str,
 ) -> Map {
@@ -620,7 +874,9 @@ fn generate_3d_map(
 
     for sector in &map.sectors {
         let map_sector = generate_sector_from_wad(
+            wad,
             &map,
+            texture_loader,
             texture_queue,
             sector,
             &mut slope_mesh,
@@ -748,6 +1004,7 @@ fn read_all_color_maps(wad: &Wad) -> Option<Vec<ColorMap>> {
     None
 }
 
+#[derive(Clone)]
 struct Texture {
     width: usize,
     height: usize,
@@ -1051,7 +1308,9 @@ fn process_texture_defs(
     texture_defs: &Vec<TextureDef>,
     color_map: &ColorMap,
     palette: &Palette,
-) {
+) -> HashMap<String, Texture> {
+    let mut result = HashMap::new();
+
     for def in texture_defs {
         let mut pixels = vec![0u8; def.width * def.height * 4];
         for patch in &def.patches {
@@ -1061,8 +1320,8 @@ fn process_texture_defs(
                 read_patch_texture(wad, &patch_name, color_map, palette)
                     .expect("Failed to read patch texture");
 
-            let mut xoff = patch.origin_x as isize;
-            let mut yoff = patch.origin_y as isize;
+            let xoff = patch.origin_x as isize;
+            let yoff = patch.origin_y as isize;
             for sy in 0..texture.height {
                 for sx in 0..texture.width {
                     let source_index = sx + sy * texture.width;
@@ -1099,8 +1358,17 @@ fn process_texture_defs(
             top_offset: 0,
             pixels,
         };
-        let path = format!("test/{}.png", def.name);
-        write_texture_to_png(&path, &new_texture);
+
+        result.insert(def.name.clone(), new_texture);
+    }
+
+    result
+}
+
+fn write_all_textures(textures: &HashMap<String, Texture>) {
+    for (name, texture) in textures {
+        let path = format!("test/{}.png", name);
+        write_texture_to_png(&path, texture);
     }
 }
 
@@ -1426,8 +1694,8 @@ impl Gltf {
         let start = self.data_buffer.len();
 
         for uv in uvs {
-            let u = uv.x / 100.0;
-            let v = uv.y / 100.0;
+            let u = uv.x;
+            let v = uv.y;
             self.data_buffer.extend_from_slice(&u.to_le_bytes());
             self.data_buffer.extend_from_slice(&v.to_le_bytes());
         }
@@ -1625,8 +1893,8 @@ impl Gltf {
             textures: self.textures,
         };
 
-        let text = serde_json::to_string_pretty(&gltf_json).unwrap();
-        println!("{}", text);
+        // let text = serde_json::to_string_pretty(&gltf_json).unwrap();
+        // println!("{}", text);
 
         let mut text = serde_json::to_string(&gltf_json).unwrap();
         // TODO(patrik): Fix?
@@ -1679,32 +1947,33 @@ fn write_map_gltf<P>(
 
     let mut textures = Vec::new();
     for t in &texture_queue.textures {
-        let texture = texture_loader
-            .load(&wad, &t)
-            .expect("Failed to load texture");
-        println!("{}: {}, {}", t, texture.width, texture.height);
+        if let Some(texture) = texture_loader.load(&wad, &t) {
+            println!("{}: {}, {}", t, texture.width, texture.height);
 
-        let mut result = Vec::new();
-        {
-            let ref mut file_writer = BufWriter::new(&mut result);
+            let mut result = Vec::new();
+            {
+                let ref mut file_writer = BufWriter::new(&mut result);
 
-            let mut encoder = png::Encoder::new(
-                file_writer,
-                texture.width as u32,
-                texture.height as u32,
-            );
-            encoder.set_color(png::ColorType::Rgba);
-            encoder.set_depth(png::BitDepth::Eight);
+                let mut encoder = png::Encoder::new(
+                    file_writer,
+                    texture.width as u32,
+                    texture.height as u32,
+                );
+                encoder.set_color(png::ColorType::Rgba);
+                encoder.set_depth(png::BitDepth::Eight);
 
-            let mut writer = encoder.write_header().unwrap();
-            writer.write_image_data(&texture.pixels).unwrap();
+                let mut writer = encoder.write_header().unwrap();
+                writer.write_image_data(&texture.pixels).unwrap();
+            }
+
+            let image_id = gltf.create_image(t.clone(), &result);
+            let texture_id =
+                gltf.create_texture(t.clone(), texture_sampler, image_id);
+
+            textures.push(texture_id);
+        } else {
+            panic!("Failed to load texture: '{}'", t);
         }
-
-        let image_id = gltf.create_image(t.clone(), &result);
-        let texture_id =
-            gltf.create_texture(t.clone(), texture_sampler, image_id);
-
-        textures.push(texture_id);
     }
 
     for sector_index in 0..map.sectors.len() {
@@ -1726,18 +1995,27 @@ fn write_map_gltf<P>(
         let material_id = gltf.create_material(
             format!("Sector #{} Ceiling", sector_index),
             Vec4::new(1.0, 1.0, 1.0, 1.0),
-            None,
+            Some(GltfTextureInfo {
+                index: textures[sector.ceiling_mesh.texture_id.unwrap_or(0)],
+                tex_coord: 0,
+            }),
         );
 
         gltf.add_mesh_primitive(mesh_id, &sector.ceiling_mesh, material_id);
 
-        let material_id = gltf.create_material(
-            format!("Sector #{} Walls", sector_index),
-            Vec4::new(1.0, 1.0, 1.0, 1.0),
-            None,
-        );
+        // DISABLE
+        for (texture_id, wall_mesh) in &sector.wall_meshes {
+            let material_id = gltf.create_material(
+                format!("Sector #{} Walls Tex #{}", sector_index, texture_id),
+                Vec4::new(1.0, 1.0, 1.0, 1.0),
+                Some(GltfTextureInfo {
+                    index: textures[*texture_id],
+                    tex_coord: 0,
+                }),
+            );
 
-        gltf.add_mesh_primitive(mesh_id, &sector.wall_mesh, material_id);
+            gltf.add_mesh_primitive(mesh_id, &wall_mesh, material_id);
+        }
 
         let node_id =
             gltf.create_node(format!("Sector #{}-col", sector_index), mesh_id);
@@ -1810,7 +2088,14 @@ fn main() {
     // assert!(!wad.find_dir("TEXTURE2").is_ok());
     let texture_defs =
         read_texture_defs(&wad).expect("Failed to read texture defs");
-    // process_texture_defs(&wad, &patch_names, &texture_defs, final_color_map, final_palette);
+    let textures = process_texture_defs(
+        &wad,
+        &patch_names,
+        &texture_defs,
+        final_color_map,
+        final_palette,
+    );
+    write_all_textures(&textures);
 
     let map = if let Some(map) = args.map.as_ref() {
         map.as_str()
@@ -1824,7 +2109,7 @@ fn main() {
 
     let mut texture_queue = TextureQueue::new();
 
-    let map = generate_3d_map(&wad, &mut texture_queue, map);
+    let map = generate_3d_map(&wad, &texture_loader, &mut texture_queue, map);
     write_map_gltf(&wad, map, &texture_queue, &texture_loader, output);
 
     // for t in texture_queue.textures {

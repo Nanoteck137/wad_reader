@@ -10,6 +10,50 @@ impl Vec2 {
     }
 }
 
+impl std::ops::Add<Vec2> for Vec2 {
+    type Output = Vec2;
+
+    fn add(self, rhs: Vec2) -> Vec2 {
+        let x = self.x + rhs.x;
+        let y = self.y + rhs.y;
+
+        Vec2::new(x, y)
+    }
+}
+
+impl std::ops::Div<f32> for Vec2 {
+    type Output = Vec2;
+
+    fn div(self, rhs: f32) -> Vec2 {
+        let x = self.x / rhs;
+        let y = self.y / rhs;
+
+        Vec2::new(x, y)
+    }
+}
+
+impl std::ops::Mul<Vec2> for Vec2 {
+    type Output = Vec2;
+
+    fn mul(self, rhs: Vec2) -> Vec2 {
+        let x = self.x * rhs.x;
+        let y = self.y * rhs.y;
+
+        Vec2::new(x, y)
+    }
+}
+
+impl std::ops::Mul<f32> for Vec2 {
+    type Output = Vec2;
+
+    fn mul(self, rhs: f32) -> Vec2 {
+        let x = self.x * rhs;
+        let y = self.y * rhs;
+
+        Vec2::new(x, y)
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 pub struct Vec3 {
     pub x: f32,
