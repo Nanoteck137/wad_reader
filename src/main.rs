@@ -6,7 +6,6 @@ use std::collections::HashMap;
 
 use clap::Parser;
 use serde::{Serialize, Deserialize};
-use serde_json::Value;
 
 use wad::Wad;
 use gltf::{Vec2, Vec3, Vec4, Vertex};
@@ -14,73 +13,6 @@ use gltf::{Vec2, Vec3, Vec4, Vertex};
 mod gltf;
 mod util;
 mod wad;
-
-/// TODO(patrik):
-///   - Map format
-///     - Textures
-
-static COLOR_TABLE: [Vec4; 10] = [
-    Vec4::new(
-        0.6705882352941176,
-        0.56078431372549020,
-        0.564705882352941200,
-        1.0,
-    ),
-    Vec4::new(
-        0.7137254901960784,
-        0.53333333333333330,
-        0.223529411764705900,
-        1.0,
-    ),
-    Vec4::new(
-        0.6705882352941176,
-        0.71372549019607840,
-        0.686274509803921600,
-        1.0,
-    ),
-    Vec4::new(
-        0.9058823529411765,
-        0.55686274509803920,
-        0.725490196078431300,
-        1.0,
-    ),
-    Vec4::new(
-        0.4823529411764706,
-        0.30196078431372547,
-        0.396078431372549000,
-        1.0,
-    ),
-    Vec4::new(
-        0.4039215686274510,
-        0.88627450980392150,
-        0.027450980392156862,
-        1.0,
-    ),
-    Vec4::new(
-        0.6745098039215687,
-        0.32941176470588235,
-        0.078431372549019600,
-        1.0,
-    ),
-    Vec4::new(
-        0.9411764705882353,
-        0.68235294117647060,
-        0.843137254901960800,
-        1.0,
-    ),
-    Vec4::new(
-        0.7176470588235294,
-        0.32941176470588235,
-        0.156862745098039200,
-        1.0,
-    ),
-    Vec4::new(
-        0.6274509803921569,
-        0.31372549019607840,
-        0.011764705882352941,
-        1.0,
-    ),
-];
 
 fn read_file<P>(path: P) -> Vec<u8>
 where
@@ -433,7 +365,7 @@ fn gen_normal_wall(
 
     let length = (dx * dx + dy * dy).sqrt();
 
-    let lower_peg = true;
+    let lower_peg = false;
     let ceiling1 = sector.ceiling_height;
     let floor1 = sector.floor_height;
 
@@ -507,7 +439,7 @@ fn gen_diff_wall(
 
     let length = (dx * dx + dy * dy).sqrt();
 
-    let lower_peg = false;
+    let lower_peg = true;
     let height = (front - back).round();
 
     let x_offset = sidedef.x_offset as f32;
