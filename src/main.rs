@@ -127,14 +127,7 @@ impl TextureLoader {
         let texture_defs =
             read_texture_defs(&wad).expect("Failed to read texture defs");
 
-        let textures = process_texture_defs(
-            &wad,
-            self,
-            &patch_names,
-            &texture_defs,
-            &self.color_map,
-            &self.palette,
-        );
+        let textures = process_texture_defs(self, &patch_names, &texture_defs);
 
         for (name, texture) in textures {
             self.add_texture(&name, texture);
@@ -1218,12 +1211,9 @@ fn read_texture_defs(wad: &Wad) -> Option<Vec<TextureDef>> {
 }
 
 fn process_texture_defs(
-    wad: &Wad,
     texture_loader: &TextureLoader,
     patch_names: &Vec<String>,
     texture_defs: &Vec<TextureDef>,
-    color_map: &ColorMap,
-    palette: &Palette,
 ) -> HashMap<String, Texture> {
     let mut result = HashMap::new();
 
@@ -1231,10 +1221,6 @@ fn process_texture_defs(
         let mut pixels = vec![0u8; def.width * def.height * 4];
         for patch in &def.patches {
             let patch_name = &patch_names[patch.patch];
-
-            // let texture =
-            //     read_patch_texture(wad, &patch_name, color_map, palette)
-            //         .expect("Failed to read patch texture");
 
             let texture = texture_loader
                 .load(&patch_name)
