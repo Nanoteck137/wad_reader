@@ -117,9 +117,6 @@ where
         {
             let name =
                 context.texture_loader.get_name_from_id(texture_id).unwrap();
-            if texture_id == 0 {
-                println!("Name: {}", name);
-            }
             let png = util::write_texture_to_png(texture);
             let image_id = gltf.create_image(name.clone(), &png);
             let gltf_texture_id =
@@ -170,9 +167,6 @@ where
         }
 
         for (texture_id, mesh) in wall_meshes {
-            if texture_id == 0 {
-                println!("LEL");
-            }
             let material_id = gltf.create_material(
                 format!("Sector #{} Walls Tex #{}", sector_index, texture_id),
                 Vec4::new(1.0, 1.0, 1.0, 1.0),

@@ -379,7 +379,11 @@ pub fn gen_walls(
                     let back = back_sector.ceiling_height;
 
                     let (texture_id, texture) =
-                        context.texture(&front_sidedef.upper_texture, true);
+                        if front_sidedef.upper_texture == "-" {
+                            context.texture(&back_sidedef.upper_texture, true)
+                        } else {
+                            context.texture(&front_sidedef.upper_texture, true)
+                        };
 
                     let mut quad = gen_diff_wall(
                         texture,
