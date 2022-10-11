@@ -2,6 +2,7 @@
 
 #![allow(dead_code)]
 
+use crate::util;
 use bitflags::bitflags;
 
 bitflags! {
@@ -212,32 +213,33 @@ impl Linedef {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct Sidedef {
     pub x_offset: i16,
     pub y_offset: i16,
-    pub upper_texture_name: [u8; 8],
-    pub middle_texture_name: [u8; 8],
-    pub lower_texture_name: [u8; 8],
     pub sector: usize,
+
+    pub upper_texture: String,
+    pub middle_texture: String,
+    pub lower_texture: String,
 }
 
 impl Sidedef {
     fn new(
         x_offset: i16,
         y_offset: i16,
-        upper_texture_name: [u8; 8],
-        middle_texture_name: [u8; 8],
-        lower_texture_name: [u8; 8],
         sector: usize,
+        upper_texture: String,
+        middle_texture: String,
+        lower_texture: String,
     ) -> Self {
         Self {
             x_offset,
             y_offset,
-            upper_texture_name,
-            middle_texture_name,
-            lower_texture_name,
             sector,
+            upper_texture,
+            middle_texture,
+            lower_texture,
         }
     }
 }
@@ -247,8 +249,8 @@ pub struct Sector {
     pub floor_height: f32,
     pub ceiling_height: f32,
 
-    pub floor_texture_name: [u8; 8],
-    pub ceiling_texture_name: [u8; 8],
+    pub floor_texture: String,
+    pub ceiling_texture: String,
 
     pub lines: Vec<Linedef>,
     pub sub_sectors: Vec<SubSector>,
@@ -258,15 +260,15 @@ impl Sector {
     fn new(
         floor_height: f32,
         ceiling_height: f32,
-        floor_texture_name: [u8; 8],
-        ceiling_texture_name: [u8; 8],
+        floor_texture: String,
+        ceiling_texture: String,
     ) -> Self {
         Self {
             floor_height,
             ceiling_height,
 
-            floor_texture_name,
-            ceiling_texture_name,
+            floor_texture,
+            ceiling_texture,
 
             lines: Vec::new(),
             sub_sectors: Vec::new(),
@@ -526,17 +528,20 @@ impl Map {
                     .map_err(|_| Error::ArrayConvertionFailed)?,
             );
 
-            let upper_texture_name: [u8; 8] = data[4..12]
+            let upper_texture: [u8; 8] = data[4..12]
                 .try_into()
                 .map_err(|_| Error::ArrayConvertionFailed)?;
+            let upper_texture = util::array_to_string(&upper_texture);
 
-            let lower_texture_name: [u8; 8] = data[12..20]
+            let lower_texture: [u8; 8] = data[12..20]
                 .try_into()
                 .map_err(|_| Error::ArrayConvertionFailed)?;
+            let lower_texture = util::array_to_string(&lower_texture);
 
-            let middle_texture_name: [u8; 8] = data[20..28]
+            let middle_texture: [u8; 8] = data[20..28]
                 .try_into()
                 .map_err(|_| Error::ArrayConvertionFailed)?;
+            let middle_texture = util::array_to_string(&middle_texture);
 
             let sector = i16::from_le_bytes(
                 data[28..30]
@@ -550,10 +555,10 @@ impl Map {
             self.sidedefs.push(Sidedef::new(
                 x_offset,
                 y_offset,
-                upper_texture_name,
-                middle_texture_name,
-                lower_texture_name,
                 sector,
+                upper_texture,
+                middle_texture,
+                lower_texture,
             ));
         }
 
@@ -587,18 +592,21 @@ impl Map {
                 .try_into()
                 .map_err(|_| Error::ConvertToF32Failed)?;
 
-            let floor_texture_name: [u8; 8] = data[4..12]
+            let floor_texture: [u8; 8] = data[4..12]
                 .try_into()
                 .map_err(|_| Error::ArrayConvertionFailed)?;
-            let ceiling_texture_name: [u8; 8] = data[12..20]
+            let floor_texture = util::array_to_string(&floor_texture);
+
+            let ceiling_texture: [u8; 8] = data[12..20]
                 .try_into()
                 .map_err(|_| Error::ArrayConvertionFailed)?;
+            let ceiling_texture = util::array_to_string(&ceiling_texture);
 
             self.sectors.push(Sector::new(
                 floor_height,
                 ceiling_height,
-                floor_texture_name,
-                ceiling_texture_name,
+                floor_texture,
+                ceiling_texture,
             ));
         }
 
@@ -707,10 +715,10 @@ impl Map {
     fn sort_subsectors(&mut self) -> Result<()> {
         for line in &self.linedefs {
             let sector = if let Some(side) = line.front_sidedef {
-                let side = self.sidedefs[side];
+                let side = &self.sidedefs[side];
                 Ok(side.sector)
             } else if let Some(side) = line.back_sidedef {
-                let side = self.sidedefs[side];
+                let side = &self.sidedefs[side];
                 Ok(side.sector)
             } else {
                 continue;
@@ -735,7 +743,7 @@ impl Map {
                     Err(Error::UnknownSide { side: segment.side })
                 }?;
 
-                let sidedef = self.sidedefs[sidedef];
+                let sidedef = &self.sidedefs[sidedef];
                 self.sectors[sidedef.sector].sub_sectors.push(*sub_sector);
             }
         }

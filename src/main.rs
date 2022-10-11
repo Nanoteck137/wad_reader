@@ -111,17 +111,23 @@ where
     let scene_id = gltf.create_scene(map_name.to_string());
     let texture_sampler = gltf.create_sampler("Default Sampler".to_string());
 
-    let mut textures = Vec::new();
-    for t in &context.texture_queue.textures {
-        if let Some(texture) = context.texture_loader.load(&t) {
+    let mut textures = HashMap::new();
+    for &texture_id in &context.texture_queue {
+        if let Some(texture) = context.texture_loader.load_from_id(texture_id)
+        {
+            let name =
+                context.texture_loader.get_name_from_id(texture_id).unwrap();
+            if texture_id == 0 {
+                println!("Name: {}", name);
+            }
             let png = util::write_texture_to_png(texture);
-            let image_id = gltf.create_image(t.clone(), &png);
-            let texture_id =
-                gltf.create_texture(t.clone(), texture_sampler, image_id);
+            let image_id = gltf.create_image(name.clone(), &png);
+            let gltf_texture_id =
+                gltf.create_texture(name.clone(), texture_sampler, image_id);
 
-            textures.push(texture_id);
+            textures.insert(texture_id, gltf_texture_id);
         } else {
-            panic!("Failed to load texture: '{}'", t);
+            panic!("Failed to load texture: '{}'", texture_id);
         }
     }
 
@@ -134,7 +140,7 @@ where
             format!("Sector #{} Floor", sector_index),
             Vec4::new(1.0, 1.0, 1.0, 1.0),
             Some(GltfTextureInfo::new(
-                textures[sector.floor_mesh.texture_id.unwrap_or(0)],
+                textures[&sector.floor_mesh.texture_id.unwrap()],
             )),
         );
 
@@ -144,7 +150,7 @@ where
             format!("Sector #{} Ceiling", sector_index),
             Vec4::new(1.0, 1.0, 1.0, 1.0),
             Some(GltfTextureInfo::new(
-                textures[sector.ceiling_mesh.texture_id.unwrap_or(0)],
+                textures[&sector.ceiling_mesh.texture_id.unwrap()],
             )),
         );
 
@@ -164,10 +170,13 @@ where
         }
 
         for (texture_id, mesh) in wall_meshes {
+            if texture_id == 0 {
+                println!("LEL");
+            }
             let material_id = gltf.create_material(
                 format!("Sector #{} Walls Tex #{}", sector_index, texture_id),
                 Vec4::new(1.0, 1.0, 1.0, 1.0),
-                Some(GltfTextureInfo::new(textures[texture_id])),
+                Some(GltfTextureInfo::new(textures[&texture_id])),
                 // None,
             );
 
@@ -196,7 +205,7 @@ where
         gltf.add_mesh_primitive(slope_mesh_id, &slope_mesh, material_id);
 
         let extra_node_id = gltf.create_node(
-            format!("Sector #{}: Slope Mesh", sector_index),
+            format!("Sector #{}: Slope Mesh-colonly", sector_index),
             slope_mesh_id,
         );
         gltf.add_node_to_scene(scene_id, extra_node_id);
@@ -256,7 +265,7 @@ fn main() {
     let wad_map =
         wad::Map::parse_from_wad(&wad, map).expect("Failed to load wad map");
 
-    let mut context = gen::Context::new(texture_loader, texture_queue);
+    let mut context = gen::Context::new(texture_loader);
 
     let map = Map::gen_map(&mut context, &wad_map);
     write_map_gltf(&context, map, output);

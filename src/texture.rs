@@ -370,8 +370,8 @@ fn process_texture_defs(
         for patch in &def.patches {
             let patch_name = &patch_names[patch.patch];
 
-            let texture = texture_loader
-                .load(&patch_name)
+            let (_, texture) = texture_loader
+                .load_from_name(&patch_name)
                 .expect("Failed to read patch texture");
 
             let xoff = patch.origin_x as isize;
@@ -461,6 +461,7 @@ pub struct TextureLoader {
     color_map: ColorMap,
     palette: Palette,
 
+    missing_texture_id: usize,
     textures: Vec<(String, Texture)>,
 }
 
@@ -476,14 +477,37 @@ impl TextureLoader {
             color_map,
             palette,
 
+            missing_texture_id: 0,
             textures: Vec::new(),
         };
 
+        result.load_missing_texture();
         result.load_all_patches(wad);
         result.load_all_flats(wad);
         result.load_all_textures(wad);
 
         Some(result)
+    }
+
+    fn load_missing_texture(&mut self) {
+        let mut pixels = vec![0; 2 * 2 * std::mem::size_of::<u32>()];
+
+        let mut set_pixel = |index: usize, r, g, b| {
+            pixels[index * 4 + 0] = r;
+            pixels[index * 4 + 1] = g;
+            pixels[index * 4 + 2] = b;
+            pixels[index * 4 + 3] = 0xff;
+        };
+
+        set_pixel(0, 0x00, 0x00, 0x00);
+        set_pixel(1, 0xff, 0x00, 0xff);
+        set_pixel(2, 0xff, 0x00, 0xff);
+        set_pixel(3, 0x00, 0x00, 0x00);
+
+        let id = self.textures.len();
+        let texture = Texture::new(2, 2, pixels);
+        self.add_texture("MISSING_TEXTURE", texture);
+        self.missing_texture_id = id;
     }
 
     fn load_all_patches(&mut self, wad: &Wad) {
@@ -588,10 +612,25 @@ impl TextureLoader {
         self.textures.push((name.to_string(), texture));
     }
 
-    pub fn load(&self, name: &str) -> Option<&Texture> {
-        for (texture_name, texture) in &self.textures {
-            if texture_name == name {
-                return Some(texture);
+    pub fn missing_texture(&self) -> (usize, &Texture) {
+        (
+            self.missing_texture_id,
+            self.load_from_id(self.missing_texture_id).unwrap(),
+        )
+    }
+
+    pub fn load_from_id(&self, id: usize) -> Option<&Texture> {
+        self.textures.get(id).map(|o| &o.1)
+    }
+
+    pub fn get_name_from_id(&self, id: usize) -> Option<&String> {
+        self.textures.get(id).map(|o| &o.0)
+    }
+
+    pub fn load_from_name(&self, name: &str) -> Option<(usize, &Texture)> {
+        for (index, t) in self.textures.iter().enumerate() {
+            if t.0 == name {
+                return Some((index, &t.1));
             }
         }
 

@@ -7,6 +7,14 @@ use std::io::{Read, Write, BufWriter};
 use crate::polygon::Vertex;
 use crate::texture::Texture;
 
+pub fn array_to_string(arr: &[u8]) -> String {
+    let null_pos = arr.iter().position(|&c| c == 0).unwrap_or(arr.len());
+    let s = &arr[..null_pos];
+    let s = std::str::from_utf8(&s).expect("Failed to convert array to str");
+
+    s.to_string()
+}
+
 pub fn read_binary_file<P>(path: P) -> Vec<u8>
 where
     P: AsRef<Path>,
