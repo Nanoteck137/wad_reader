@@ -1,6 +1,21 @@
 //! Module for utility functions
 
+use std::path::Path;
+use std::fs::File;
+use std::io::Read;
 use crate::gltf;
+
+pub fn read_binary_file<P>(path: P) -> Vec<u8>
+where
+    P: AsRef<Path>,
+{
+    let mut file = File::open(path).unwrap();
+
+    let mut result = Vec::new();
+    file.read_to_end(&mut result).unwrap();
+
+    result
+}
 
 pub fn triangulate(polygon: &[gltf::Vertex], clockwise: bool) -> Vec<u32> {
     let mut indices = Vec::new();

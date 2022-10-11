@@ -17,18 +17,6 @@ mod wad;
 /// TODO(patrik):
 ///   - Lazy loading textures
 
-fn read_file<P>(path: P) -> Vec<u8>
-where
-    P: AsRef<Path>,
-{
-    let mut file = File::open(path).unwrap();
-
-    let mut result = Vec::new();
-    file.read_to_end(&mut result).unwrap();
-
-    result
-}
-
 struct TextureLoader {
     color_map: ColorMap,
     palette: Palette,
@@ -601,8 +589,8 @@ fn gen_slope(
     let uv = Vec2::new(0.0, 0.0);
 
     let mut quad = Quad::new();
-    quad.points[0] = Vertex::new(pos0 + normal * diff, normal, uv, color);
-    quad.points[1] = Vertex::new(pos1 + normal * diff, normal, uv, color);
+    quad.points[0] = Vertex::new(pos0, normal, uv, color);
+    quad.points[1] = Vertex::new(pos1, normal, uv, color);
     quad.points[2] = Vertex::new(pos2, normal, uv, color);
     quad.points[3] = Vertex::new(pos3, normal, uv, color);
 
@@ -2006,11 +1994,9 @@ fn main() {
     };
 
     // Read the raw wad file
-    let data = read_file(args.wad_file);
+    let data = util::read_binary_file(args.wad_file);
     // Parse the wad
     let wad = Wad::parse(&data).expect("Failed to parse WAD file");
-
-    std::fs::create_dir_all("test").expect("Failed to create 'test' folder");
 
     let palettes = read_all_palettes(&wad).expect("Failed to read palettes");
     let final_palette = &palettes[0];
@@ -2025,20 +2011,6 @@ fn main() {
         final_palette.clone(),
     )
     .expect("Failed to create TextureLoader");
-
-    // FLOOR4_8 (flat)
-    let texture =
-        read_flat_texture(&wad, "FLOOR4_8", final_color_map, final_palette)
-            .expect("Failed to read FLOOR4_8");
-    let path = format!("test/FLOOR4_8.png");
-    write_texture_to_png(&path, &texture);
-
-    // TITLEPIC (PATCH FORMAT)
-    let texture =
-        read_patch_texture(&wad, "TITLEPIC", final_color_map, final_palette)
-            .expect("Failed to read TITLEPIC");
-    let path = format!("test/TITLEPIC.png");
-    write_texture_to_png(&path, &texture);
 
     // texture_loader.debug_write_textures();
 
@@ -2056,17 +2028,4 @@ fn main() {
 
     let map = generate_3d_map(&wad, &texture_loader, &mut texture_queue, map);
     write_map_gltf(&wad, map, &texture_queue, &texture_loader, output);
-
-    // for t in texture_queue.textures {
-    //     let texture = texture_loader
-    //         .load(&wad, &t)
-    //         .expect("Failed to load texture");
-    //     println!("{}: {}, {}", t, texture.width, texture.height);
-    // }
-    //
-    // let mut mime = mime::Mime::new();
-    // mime.add_map(map);
-    //
-    // mime.save_to_file(output)
-    //     .expect("Failed to save the generated map to the file");
 }
