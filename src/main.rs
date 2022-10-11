@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::BufWriter;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 
@@ -8,14 +8,34 @@ use clap::Parser;
 use serde::{Serialize, Deserialize};
 
 use wad::Wad;
-use gltf::{Vec2, Vec3, Vec4, Vertex};
+use math::{Vec2, Vec3, Vec4};
 
 mod gltf;
+mod math;
 mod util;
 mod wad;
 
 /// TODO(patrik):
 ///   - Lazy loading textures
+
+#[derive(Copy, Clone, Default, Debug)]
+pub struct Vertex {
+    pub pos: Vec3,
+    pub normal: Vec3,
+    pub uv: Vec2,
+    pub color: Vec4,
+}
+
+impl Vertex {
+    pub fn new(pos: Vec3, normal: Vec3, uv: Vec2, color: Vec4) -> Self {
+        Self {
+            pos,
+            normal,
+            uv,
+            color,
+        }
+    }
+}
 
 struct TextureLoader {
     color_map: ColorMap,
