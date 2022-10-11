@@ -117,7 +117,7 @@ pub fn gen_ceiling(
     mesh
 }
 
-fn update_uv(
+fn update_quad_uvs(
     quad: &mut Quad,
     texture: &Texture,
     length: f32,
@@ -164,40 +164,19 @@ fn create_normal_wall_quad(
     let texture_id = context.queue_texture(sidedef.middle_texture_name);
     let texture = context.get_texture_from_id(texture_id.unwrap()).unwrap();
 
-    let x1 = start.x;
-    let y1 = start.y;
-    let x2 = end.x;
-    let y2 = end.y;
-
-    let pos0 = Vec3::new(x1, sector.ceiling_height, y1);
-    let pos1 = Vec3::new(x1, sector.floor_height, y1);
-    let pos2 = Vec3::new(x2, sector.floor_height, y2);
-    let pos3 = Vec3::new(x2, sector.ceiling_height, y2);
-
-    let a = pos1;
-    let b = pos3;
-    let c = pos2;
-
-    let normal = ((b - a).cross(c - a)).normalize();
-
-    let color = Vec4::new(1.0, 1.0, 1.0, 1.0);
+    let start = Vec2::new(start.x, start.y);
+    let end = Vec2::new(end.x, end.y);
+    let mut quad =
+        create_quad(start, end, sector.floor_height, sector.ceiling_height);
 
     let dx = end.x - start.x;
     let dy = end.y - start.y;
 
     let length = (dx * dx + dy * dy).sqrt();
 
-    let uv = Vec2::new(0.0, 0.0);
-    let mut quad = Quad::new();
-    quad.texture_id = texture_id.unwrap();
-    quad.points[0] = Vertex::new(pos0, normal, uv, color);
-    quad.points[1] = Vertex::new(pos1, normal, uv, color);
-    quad.points[2] = Vertex::new(pos2, normal, uv, color);
-    quad.points[3] = Vertex::new(pos3, normal, uv, color);
-
     let lower_peg = linedef.flags & wad::LINEDEF_FLAG_LOWER_TEXTURE_UNPEGGED
         == wad::LINEDEF_FLAG_LOWER_TEXTURE_UNPEGGED;
-    update_uv(
+    update_quad_uvs(
         &mut quad,
         &texture,
         length,
@@ -207,6 +186,41 @@ fn create_normal_wall_quad(
         sector.floor_height,
         lower_peg,
     );
+
+    quad
+}
+
+fn create_quad(p1: Vec2, p2: Vec2, bottom: f32, top: f32) -> Quad {
+    let pos0 = Vec3::new(p1.x, top, p1.y);
+    let pos1 = Vec3::new(p1.x, bottom, p1.y);
+    let pos2 = Vec3::new(p2.x, bottom, p2.y);
+    let pos3 = Vec3::new(p2.x, top, p2.y);
+
+    let a = pos1;
+    let b = pos3;
+    let c = pos2;
+
+    // TODO(patrik): Check the normal
+    let normal = ((b - a).cross(c - a)).normalize();
+
+    let x = (normal.x * 0.5) + 0.5;
+    let y = (normal.y * 0.5) + 0.5;
+    let z = (normal.z * 0.5) + 0.5;
+    let color = Vec4::new(x, y, z, 1.0);
+
+    // let color = Vec4::new(1.0, 1.0, 1.0, 1.0);
+
+    // let dx = p2.x - p1.x;
+    // let dy = p2.y - p1.y;
+    //
+    // let length = (dx * dx + dy * dy).sqrt();
+
+    let uv = Vec2::new(0.0, 0.0);
+    let mut quad = Quad::new();
+    quad.points[0] = Vertex::new(pos0, normal, uv, color);
+    quad.points[1] = Vertex::new(pos1, normal, uv, color);
+    quad.points[2] = Vertex::new(pos2, normal, uv, color);
+    quad.points[3] = Vertex::new(pos3, normal, uv, color);
 
     quad
 }
@@ -226,41 +240,14 @@ fn gen_diff_wall(
 ) -> Quad {
     let texture = context.get_texture_from_id(texture_id).unwrap();
 
-    let x1 = start.x;
-    let y1 = start.y;
-    let x2 = end.x;
-    let y2 = end.y;
-
-    let pos0 = Vec3::new(x1, back, y1);
-    let pos1 = Vec3::new(x1, front, y1);
-    let pos2 = Vec3::new(x2, front, y2);
-    let pos3 = Vec3::new(x2, back, y2);
-
-    let a = pos1;
-    let b = pos3;
-    let c = pos2;
-
-    // TODO(patrik): Check the normal
-    let normal = ((b - a).cross(c - a)).normalize();
-
-    let x = (normal.x * 0.5) + 0.5;
-    let y = (normal.y * 0.5) + 0.5;
-    let z = (normal.z * 0.5) + 0.5;
-    let color = Vec4::new(x, y, z, 1.0);
-    // let color = Vec4::new(1.0, 1.0, 1.0, 1.0);
+    let start = Vec2::new(start.x, start.y);
+    let end = Vec2::new(end.x, end.y);
+    let mut quad = create_quad(start, end, front, back);
 
     let dx = end.x - start.x;
     let dy = end.y - start.y;
 
     let length = (dx * dx + dy * dy).sqrt();
-
-    let uv = Vec2::new(0.0, 0.0);
-    let mut quad = Quad::new();
-    quad.texture_id = texture_id;
-    quad.points[0] = Vertex::new(pos0, normal, uv, color);
-    quad.points[1] = Vertex::new(pos1, normal, uv, color);
-    quad.points[2] = Vertex::new(pos2, normal, uv, color);
-    quad.points[3] = Vertex::new(pos3, normal, uv, color);
 
     if lower_quad {
         let x_offset = sidedef.x_offset as f32;
@@ -271,7 +258,7 @@ fn gen_diff_wall(
             y_offset += front_sector.ceiling_height - back_sector.floor_height;
         }
 
-        update_uv(
+        update_quad_uvs(
             &mut quad, &texture, length, x_offset, y_offset, back, front,
             false,
         );
@@ -282,7 +269,7 @@ fn gen_diff_wall(
         let upper_peg = linedef.flags
             & wad::LINEDEF_FLAG_UPPER_TEXTURE_UNPEGGED
             == wad::LINEDEF_FLAG_UPPER_TEXTURE_UNPEGGED;
-        update_uv(
+        update_quad_uvs(
             &mut quad, &texture, length, x_offset, y_offset, back, front,
             !upper_peg,
         );
@@ -298,33 +285,10 @@ fn gen_slope(
     back: f32,
     diff: f32,
 ) -> Quad {
-    let x1 = start.x;
-    let y1 = start.y;
-    let x2 = end.x;
-    let y2 = end.y;
-
-    let pos0 = Vec3::new(x1, back, y1);
-    let pos1 = Vec3::new(x1, front, y1);
-    let pos2 = Vec3::new(x2, front, y2);
-    let pos3 = Vec3::new(x2, back, y2);
-
-    let a = pos1;
-    let b = pos3;
-    let c = pos2;
-
-    let normal = ((b - a).cross(c - a)).normalize();
-    let x = (normal.x * 0.5) + 0.5;
-    let y = (normal.y * 0.5) + 0.5;
-    let z = (normal.z * 0.5) + 0.5;
-    let color = Vec4::new(x, y, z, 1.0);
-    //let color = Vec4::new(1.0, 1.0, 1.0, 1.0);
-    let uv = Vec2::new(0.0, 0.0);
-
-    let mut quad = Quad::new();
-    quad.points[0] = Vertex::new(pos0, normal, uv, color);
-    quad.points[1] = Vertex::new(pos1, normal, uv, color);
-    quad.points[2] = Vertex::new(pos2, normal, uv, color);
-    quad.points[3] = Vertex::new(pos3, normal, uv, color);
+    let start = Vec2::new(start.x, start.y);
+    let end = Vec2::new(end.x, end.y);
+    let mut quad = create_quad(start, end, front, back);
+    let normal = quad.points[0].normal;
 
     if front < back {
         quad.points[1].pos += normal * diff;

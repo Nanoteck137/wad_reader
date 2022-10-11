@@ -196,7 +196,7 @@ where
         gltf.add_mesh_primitive(slope_mesh_id, &slope_mesh, material_id);
 
         let extra_node_id = gltf.create_node(
-            format!("Sector #{}: Slope Mesh-colonly", sector_index),
+            format!("Sector #{}: Slope Mesh", sector_index),
             slope_mesh_id,
         );
         gltf.add_node_to_scene(scene_id, extra_node_id);
