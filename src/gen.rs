@@ -151,35 +151,34 @@ fn update_quad_uvs(
     quad: &mut Quad,
     texture: &Texture,
     length: f32,
-    x_offset: f32,
-    y_offset: f32,
+    offset: Vec2,
     top: f32,
     bottom: f32,
     lower_peg: bool,
 ) {
     let height = (top - bottom).round();
 
-    let mut y1 = y_offset;
-    let mut y2 = y_offset + height;
+    let mut y1 = offset.y;
+    let mut y2 = offset.y + height;
 
     let texture_size =
         Vec2::new(texture.width() as f32, texture.height() as f32);
 
     if lower_peg {
-        y2 = y_offset + texture_size.y as f32;
+        y2 = offset.y + texture_size.y as f32;
         y1 = y2 - height;
     }
 
     quad.points[0].uv =
-        Vec2::new(x_offset, y1 + (top - quad.points[0].pos.y)) / texture_size;
+        Vec2::new(offset.x, y1 + (top - quad.points[0].pos.y)) / texture_size;
     quad.points[1].uv =
-        Vec2::new(x_offset, y2 + (bottom - quad.points[1].pos.y))
+        Vec2::new(offset.x, y2 + (bottom - quad.points[1].pos.y))
             / texture_size;
     quad.points[2].uv =
-        Vec2::new(x_offset + length, y2 + (bottom - quad.points[2].pos.y))
+        Vec2::new(offset.x + length, y2 + (bottom - quad.points[2].pos.y))
             / texture_size;
     quad.points[3].uv =
-        Vec2::new(x_offset + length, y1 + (top - quad.points[3].pos.y))
+        Vec2::new(offset.x + length, y1 + (top - quad.points[3].pos.y))
             / texture_size;
 }
 
@@ -201,6 +200,7 @@ fn create_normal_wall_quad(
     quad.texture_id = texture_id.unwrap();
 
     let length = (end - start).length();
+    let offset = Vec2::new(sidedef.x_offset as f32, sidedef.y_offset as f32);
 
     let lower_peg = linedef
         .flags
@@ -209,8 +209,7 @@ fn create_normal_wall_quad(
         &mut quad,
         &texture,
         length,
-        sidedef.x_offset as f32,
-        sidedef.y_offset as f32,
+        offset,
         sector.ceiling_height,
         sector.floor_height,
         lower_peg,
@@ -242,29 +241,27 @@ fn gen_diff_wall(
     let length = (end - start).length();
 
     if lower_quad {
-        let x_offset = sidedef.x_offset as f32;
-        let mut y_offset = sidedef.y_offset as f32;
+        let mut offset =
+            Vec2::new(sidedef.x_offset as f32, sidedef.y_offset as f32);
         if linedef
             .flags
             .contains(wad::LinedefFlags::LOWER_TEXTURE_UNPEGGED)
         {
-            y_offset += front_sector.ceiling_height - back_sector.floor_height;
+            offset.y += front_sector.ceiling_height - back_sector.floor_height;
         }
 
         update_quad_uvs(
-            &mut quad, &texture, length, x_offset, y_offset, back, front,
-            false,
+            &mut quad, &texture, length, offset, back, front, false,
         );
     } else {
-        let x_offset = sidedef.x_offset as f32;
-        let y_offset = sidedef.y_offset as f32;
+        let offset =
+            Vec2::new(sidedef.x_offset as f32, sidedef.y_offset as f32);
 
         let upper_peg = linedef
             .flags
             .contains(wad::LinedefFlags::UPPER_TEXTURE_UNPEGGED);
         update_quad_uvs(
-            &mut quad, &texture, length, x_offset, y_offset, back, front,
-            !upper_peg,
+            &mut quad, &texture, length, offset, back, front, !upper_peg,
         );
     }
 
