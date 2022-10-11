@@ -202,8 +202,9 @@ fn create_normal_wall_quad(
 
     let length = (end - start).length();
 
-    let lower_peg = linedef.flags & wad::LINEDEF_FLAG_LOWER_TEXTURE_UNPEGGED
-        == wad::LINEDEF_FLAG_LOWER_TEXTURE_UNPEGGED;
+    let lower_peg = linedef
+        .flags
+        .contains(wad::LinedefFlags::LOWER_TEXTURE_UNPEGGED);
     update_quad_uvs(
         &mut quad,
         &texture,
@@ -243,8 +244,9 @@ fn gen_diff_wall(
     if lower_quad {
         let x_offset = sidedef.x_offset as f32;
         let mut y_offset = sidedef.y_offset as f32;
-        if linedef.flags & wad::LINEDEF_FLAG_LOWER_TEXTURE_UNPEGGED
-            == wad::LINEDEF_FLAG_LOWER_TEXTURE_UNPEGGED
+        if linedef
+            .flags
+            .contains(wad::LinedefFlags::LOWER_TEXTURE_UNPEGGED)
         {
             y_offset += front_sector.ceiling_height - back_sector.floor_height;
         }
@@ -257,9 +259,9 @@ fn gen_diff_wall(
         let x_offset = sidedef.x_offset as f32;
         let y_offset = sidedef.y_offset as f32;
 
-        let upper_peg = linedef.flags
-            & wad::LINEDEF_FLAG_UPPER_TEXTURE_UNPEGGED
-            == wad::LINEDEF_FLAG_UPPER_TEXTURE_UNPEGGED;
+        let upper_peg = linedef
+            .flags
+            .contains(wad::LinedefFlags::UPPER_TEXTURE_UNPEGGED);
         update_quad_uvs(
             &mut quad, &texture, length, x_offset, y_offset, back, front,
             !upper_peg,
@@ -313,9 +315,7 @@ pub fn gen_walls(
             let start = wad_map.vertex(line.start_vertex);
             let end = wad_map.vertex(line.end_vertex);
 
-            if linedef.flags & wad::LINEDEF_FLAG_TWO_SIDED
-                != wad::LINEDEF_FLAG_TWO_SIDED
-            {
+            if !linedef.flags.contains(wad::LinedefFlags::TWO_SIDED) {
                 if let Some(sidedef) = linedef.front_sidedef {
                     let sidedef = wad_map.sidedefs[sidedef];
 

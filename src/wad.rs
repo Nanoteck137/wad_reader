@@ -2,14 +2,20 @@
 
 #![allow(dead_code)]
 
-pub const LINEDEF_FLAG_IMPASSABLE: usize = 0x0001;
-pub const LINEDEF_FLAG_TWO_SIDED: usize = 0x0004;
-pub const LINEDEF_FLAG_UPPER_TEXTURE_UNPEGGED: usize = 0x0008;
-pub const LINEDEF_FLAG_LOWER_TEXTURE_UNPEGGED: usize = 0x0010;
-pub const LINEDEF_FLAG_SECRET: usize = 0x0020;
-pub const LINEDEF_FLAG_BLOCKS_SOUND: usize = 0x0020;
-pub const LINEDEF_FLAG_NEVER_SHOW_ON_AUTOMAP: usize = 0x0080;
-pub const LINEDEF_FLAG_ALWAYS_SHOWS_ON_AUTOMAP: usize = 0x0100;
+use bitflags::bitflags;
+
+bitflags! {
+    pub struct LinedefFlags: usize {
+        const IMPASSABLE = 0x0001;
+        const TWO_SIDED = 0x0004;
+        const UPPER_TEXTURE_UNPEGGED = 0x0008;
+        const LOWER_TEXTURE_UNPEGGED = 0x0010;
+        const SECRET = 0x0020;
+        const BLOCKS_SOUND = 0x0020;
+        const NEVER_SHOW_ON_AUTOMAP = 0x0080;
+        const ALWAYS_SHOWS_ON_AUTOMAP = 0x0100;
+    }
+}
 
 #[derive(Copy, Clone, Debug)]
 pub enum Error {
@@ -185,7 +191,7 @@ impl Line {
 #[derive(Copy, Clone, Debug)]
 pub struct Linedef {
     pub line: Line,
-    pub flags: usize,
+    pub flags: LinedefFlags,
     pub front_sidedef: Option<usize>,
     pub back_sidedef: Option<usize>,
 }
@@ -193,7 +199,7 @@ pub struct Linedef {
 impl Linedef {
     fn new(
         line: Line,
-        flags: usize,
+        flags: LinedefFlags,
         front_sidedef: Option<usize>,
         back_sidedef: Option<usize>,
     ) -> Self {
@@ -465,6 +471,7 @@ impl Map {
 
             let flags: usize =
                 flags.try_into().map_err(|_| Error::ConvertToUsizeFailed)?;
+            let flags = LinedefFlags::from_bits_truncate(flags);
 
             let line = Line::new(start_vertex, end_vertex);
 
