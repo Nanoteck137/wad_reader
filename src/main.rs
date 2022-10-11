@@ -9,9 +9,11 @@ use serde::{Serialize, Deserialize};
 
 use wad::Wad;
 use math::{Vec2, Vec3, Vec4};
+use texture::Texture;
 
 mod gltf;
 mod math;
+mod texture;
 mod util;
 mod wad;
 
@@ -326,8 +328,8 @@ fn generate_sector_floor(
     let name = texture_queue.get_name_from_id(texture_id.unwrap()).unwrap();
     let texture = texture_loader.load(name).unwrap();
 
-    let w = 1.0 / texture.width as f32;
-    let h = 1.0 / texture.height as f32;
+    let w = 1.0 / texture.width() as f32;
+    let h = 1.0 / texture.height() as f32;
 
     let dim = Vec2::new(w, -h);
 
@@ -367,8 +369,8 @@ fn generate_sector_ceiling(
     let name = texture_queue.get_name_from_id(texture_id.unwrap()).unwrap();
     let texture = texture_loader.load(name).unwrap();
 
-    let w = 1.0 / texture.width as f32;
-    let h = 1.0 / texture.height as f32;
+    let w = 1.0 / texture.width() as f32;
+    let h = 1.0 / texture.height() as f32;
 
     let dim = Vec2::new(w, -h);
 
@@ -411,22 +413,25 @@ fn update_uv(
     let mut y1 = y_offset;
     let mut y2 = y_offset + height;
 
+    let texture_size =
+        Vec2::new(texture.width() as f32, texture.height() as f32);
+
     if lower_peg {
-        y2 = y_offset + texture.height as f32;
+        y2 = y_offset + texture_size.y as f32;
         y1 = y2 - height;
     }
 
-    let dim = Vec2::new(texture.width as f32, texture.height as f32);
-
     quad.points[0].uv =
-        Vec2::new(x_offset, y1 + (top - quad.points[0].pos.y)) / dim;
+        Vec2::new(x_offset, y1 + (top - quad.points[0].pos.y)) / texture_size;
     quad.points[1].uv =
-        Vec2::new(x_offset, y2 + (bottom - quad.points[1].pos.y)) / dim;
+        Vec2::new(x_offset, y2 + (bottom - quad.points[1].pos.y))
+            / texture_size;
     quad.points[2].uv =
         Vec2::new(x_offset + length, y2 + (bottom - quad.points[2].pos.y))
-            / dim;
+            / texture_size;
     quad.points[3].uv =
-        Vec2::new(x_offset + length, y1 + (top - quad.points[3].pos.y)) / dim;
+        Vec2::new(x_offset + length, y1 + (top - quad.points[3].pos.y))
+            / texture_size;
 }
 
 fn create_normal_wall_quad(
@@ -921,15 +926,6 @@ fn read_all_color_maps(wad: &Wad) -> Option<Vec<ColorMap>> {
     None
 }
 
-#[derive(Clone)]
-struct Texture {
-    width: usize,
-    height: usize,
-    left_offset: i16,
-    top_offset: i16,
-    pixels: Vec<u8>,
-}
-
 fn read_flat_texture(
     wad: &Wad,
     name: &str,
@@ -958,13 +954,11 @@ fn read_flat_texture(
             }
         }
 
-        return Some(Texture {
-            width: FLAT_TEXTURE_WIDTH,
-            height: FLAT_TEXTURE_HEIGHT,
-            left_offset: 0,
-            top_offset: 0,
+        return Some(Texture::new(
+            FLAT_TEXTURE_WIDTH,
+            FLAT_TEXTURE_HEIGHT,
             pixels,
-        });
+        ));
     }
 
     None
@@ -1036,13 +1030,7 @@ fn read_patch_texture(
             }
         }
 
-        return Some(Texture {
-            width,
-            height,
-            left_offset,
-            top_offset,
-            pixels,
-        });
+        return Some(Texture::new(width, height, pixels));
     }
 
     None
@@ -1057,14 +1045,14 @@ where
 
     let mut encoder = png::Encoder::new(
         file_writer,
-        texture.width as u32,
-        texture.height as u32,
+        texture.width() as u32,
+        texture.height() as u32,
     );
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
 
     let mut writer = encoder.write_header().unwrap();
-    writer.write_image_data(&texture.pixels).unwrap();
+    writer.write_image_data(&texture.pixels()).unwrap();
 }
 
 fn read_patch_names(wad: &Wad) -> Option<Vec<String>> {
@@ -1248,9 +1236,9 @@ fn process_texture_defs(
 
             let xoff = patch.origin_x as isize;
             let yoff = patch.origin_y as isize;
-            for sy in 0..texture.height {
-                for sx in 0..texture.width {
-                    let source_index = sx + sy * texture.width;
+            for sy in 0..texture.height() {
+                for sx in 0..texture.width() {
+                    let source_index = sx + sy * texture.width();
 
                     let x = sx as isize + xoff;
                     let y = sy as isize + yoff;
@@ -1265,33 +1253,27 @@ fn process_texture_defs(
 
                     let dest_index = (x as usize) + (y as usize) * def.width;
 
+                    let texture_pixels = texture.pixels();
                     pixels[dest_index * 4 + 0] =
-                        texture.pixels[source_index * 4 + 0];
+                        texture_pixels[source_index * 4 + 0];
                     pixels[dest_index * 4 + 1] =
-                        texture.pixels[source_index * 4 + 1];
+                        texture_pixels[source_index * 4 + 1];
                     pixels[dest_index * 4 + 2] =
-                        texture.pixels[source_index * 4 + 2];
+                        texture_pixels[source_index * 4 + 2];
                     pixels[dest_index * 4 + 3] =
-                        texture.pixels[source_index * 4 + 3];
+                        texture_pixels[source_index * 4 + 3];
                 }
             }
         }
 
-        let new_texture = Texture {
-            width: def.width,
-            height: def.height,
-            left_offset: 0,
-            top_offset: 0,
-            pixels,
-        };
-
+        let new_texture = Texture::new(def.width, def.height, pixels);
         result.insert(def.name.clone(), new_texture);
     }
 
     result
 }
 
-fn write_all_textures(textures: &HashMap<String, Texture>) {
+fn _write_all_textures(textures: &HashMap<String, Texture>) {
     for (name, texture) in textures {
         let path = format!("test/{}.png", name);
         write_texture_to_png(&path, texture);
@@ -1873,7 +1855,7 @@ fn write_map_gltf<P>(
     let mut textures = Vec::new();
     for t in &texture_queue.textures {
         if let Some(texture) = texture_loader.load(&t) {
-            println!("{}: {}, {}", t, texture.width, texture.height);
+            // println!("{}: {}, {}", t, texture.width(), texture.height());
 
             let mut result = Vec::new();
             {
@@ -1881,14 +1863,14 @@ fn write_map_gltf<P>(
 
                 let mut encoder = png::Encoder::new(
                     file_writer,
-                    texture.width as u32,
-                    texture.height as u32,
+                    texture.width() as u32,
+                    texture.height() as u32,
                 );
                 encoder.set_color(png::ColorType::Rgba);
                 encoder.set_depth(png::BitDepth::Eight);
 
                 let mut writer = encoder.write_header().unwrap();
-                writer.write_image_data(&texture.pixels).unwrap();
+                writer.write_image_data(&texture.pixels()).unwrap();
             }
 
             let image_id = gltf.create_image(t.clone(), &result);
