@@ -16,6 +16,11 @@ mod wad;
 
 /// TODO(patrik):
 ///   - Lazy loading textures
+///   - Debug Dumping Textures
+///   - Add Debug Flags
+///     - View Slopes
+///     - View Normals
+///     - View UVs
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -30,6 +35,22 @@ struct Args {
     /// Which map to convert (example E1M1)
     #[clap(short, long)]
     map: Option<String>,
+}
+
+fn queue_texture(
+    texture_queue: &mut TextureQueue,
+    texture_name: [u8; 8],
+) -> Option<usize> {
+    let null_pos = texture_name
+        .iter()
+        .position(|&c| c == 0)
+        .unwrap_or(texture_name.len());
+    let texture_name = &texture_name[..null_pos];
+    let texture_name = std::str::from_utf8(&texture_name)
+        .expect("Failed to convert floor texture name to str");
+    let texture_name = String::from(texture_name);
+
+    texture_queue.enqueue(texture_name)
 }
 
 #[derive(Copy, Clone, Default, Debug)]
@@ -117,6 +138,121 @@ impl Sector {
             slope_quads,
         }
     }
+
+    fn gen_floor(
+        wad_map: &wad::Map,
+        wad_sector: &wad::Sector,
+        texture_loader: &TextureLoader,
+        texture_queue: &mut TextureQueue,
+    ) -> Mesh {
+        let mut mesh = Mesh::new();
+
+        let texture_id =
+            queue_texture(texture_queue, wad_sector.floor_texture_name);
+        mesh.texture_id = texture_id;
+
+        let name =
+            texture_queue.get_name_from_id(texture_id.unwrap()).unwrap();
+        let texture = texture_loader.load(name).unwrap();
+
+        let w = 1.0 / texture.width() as f32;
+        let h = 1.0 / texture.height() as f32;
+
+        let dim = Vec2::new(w, -h);
+
+        for sub_sector in &wad_sector.sub_sectors {
+            let mut verts = Vec::new();
+
+            for segment in 0..sub_sector.count {
+                let segment = wad_map.segments[sub_sector.start + segment];
+                let start = wad_map.vertex(segment.start_vertex);
+
+                let pos = Vec3::new(start.x, wad_sector.floor_height, start.y);
+                let uv = Vec2::new(start.x, start.y) * dim;
+                let color = Vec4::new(1.0, 1.0, 1.0, 1.0);
+                let normal = Vec3::new(0.0, 1.0, 0.0);
+                verts.push(Vertex::new(pos, normal, uv, color));
+            }
+
+            util::cleanup_lines(&mut verts);
+            mesh.add_vertices(&verts, true);
+        }
+
+        mesh
+    }
+
+    fn gen_ceiling(
+        wad_map: &wad::Map,
+        wad_sector: &wad::Sector,
+        texture_loader: &TextureLoader,
+        texture_queue: &mut TextureQueue,
+    ) -> Mesh {
+        let mut mesh = Mesh::new();
+
+        let texture_id =
+            queue_texture(texture_queue, wad_sector.ceiling_texture_name);
+        mesh.texture_id = texture_id;
+
+        let name =
+            texture_queue.get_name_from_id(texture_id.unwrap()).unwrap();
+        let texture = texture_loader.load(name).unwrap();
+
+        let w = 1.0 / texture.width() as f32;
+        let h = 1.0 / texture.height() as f32;
+
+        let dim = Vec2::new(w, -h);
+
+        for sub_sector in &wad_sector.sub_sectors {
+            let mut verts = Vec::new();
+
+            for segment in 0..sub_sector.count {
+                let segment = wad_map.segments[sub_sector.start + segment];
+                let start = wad_map.vertex(segment.start_vertex);
+
+                let pos =
+                    Vec3::new(start.x, wad_sector.ceiling_height, start.y);
+                let uv = Vec2::new(start.x, start.y) * dim;
+                let color = Vec4::new(1.0, 1.0, 1.0, 1.0);
+                let normal = Vec3::new(0.0, -1.0, 0.0);
+                verts.push(Vertex::new(pos, normal, uv, color));
+            }
+
+            util::cleanup_lines(&mut verts);
+            mesh.add_vertices(&verts, false);
+        }
+
+        mesh
+    }
+
+    fn gen_sector(
+        wad_map: &wad::Map,
+        wad_sector: &wad::Sector,
+        texture_loader: &TextureLoader,
+        texture_queue: &mut TextureQueue,
+    ) -> Self {
+        let floor_mesh = Self::gen_floor(
+            wad_map,
+            wad_sector,
+            texture_loader,
+            texture_queue,
+        );
+
+        let ceiling_mesh = Self::gen_ceiling(
+            wad_map,
+            wad_sector,
+            texture_loader,
+            texture_queue,
+        );
+
+        let (wall_quads, slope_quads) = generate_sector_wall(
+            wad_map,
+            texture_loader,
+            texture_queue,
+            wad_sector,
+        );
+
+        Sector::new(floor_mesh, ceiling_mesh, wall_quads, slope_quads)
+    }
 }
 
 struct Map {
@@ -127,105 +263,27 @@ impl Map {
     fn new(sectors: Vec<Sector>) -> Self {
         Self { sectors }
     }
-}
 
-fn queue_texture(
-    texture_queue: &mut TextureQueue,
-    texture_name: [u8; 8],
-) -> Option<usize> {
-    let null_pos = texture_name
-        .iter()
-        .position(|&c| c == 0)
-        .unwrap_or(texture_name.len());
-    let texture_name = &texture_name[..null_pos];
-    let texture_name = std::str::from_utf8(&texture_name)
-        .expect("Failed to convert floor texture name to str");
-    let texture_name = String::from(texture_name);
+    fn gen_map(
+        wad_map: &wad::Map,
+        texture_loader: &TextureLoader,
+        texture_queue: &mut TextureQueue,
+    ) -> Self {
+        let mut sectors = Vec::new();
 
-    texture_queue.enqueue(texture_name)
-}
+        for wad_sector in &wad_map.sectors {
+            let map_sector = Sector::gen_sector(
+                &wad_map,
+                wad_sector,
+                texture_loader,
+                texture_queue,
+            );
 
-fn generate_sector_floor(
-    map: &wad::Map,
-    texture_loader: &TextureLoader,
-    texture_queue: &mut TextureQueue,
-    sector: &wad::Sector,
-) -> Mesh {
-    let mut mesh = Mesh::new();
-
-    let texture_id = queue_texture(texture_queue, sector.floor_texture_name);
-    mesh.texture_id = texture_id;
-
-    let name = texture_queue.get_name_from_id(texture_id.unwrap()).unwrap();
-    let texture = texture_loader.load(name).unwrap();
-
-    let w = 1.0 / texture.width() as f32;
-    let h = 1.0 / texture.height() as f32;
-
-    let dim = Vec2::new(w, -h);
-
-    for sub_sector in &sector.sub_sectors {
-        let mut verts = Vec::new();
-
-        for segment in 0..sub_sector.count {
-            let segment = map.segments[sub_sector.start + segment];
-            let start = map.vertex(segment.start_vertex);
-
-            let pos = Vec3::new(start.x, sector.floor_height, start.y);
-            let uv = Vec2::new(start.x, start.y) * dim;
-            let color = Vec4::new(1.0, 1.0, 1.0, 1.0);
-            let normal = Vec3::new(0.0, 1.0, 0.0);
-            verts.push(Vertex::new(pos, normal, uv, color));
+            sectors.push(map_sector);
         }
 
-        util::cleanup_lines(&mut verts);
-        mesh.add_vertices(&verts, true);
+        Map::new(sectors)
     }
-
-    mesh
-}
-
-fn generate_sector_ceiling(
-    map: &wad::Map,
-    texture_loader: &TextureLoader,
-    texture_queue: &mut TextureQueue,
-    sector: &wad::Sector,
-) -> Mesh {
-    let mut mesh = Mesh::new();
-
-    let texture_id = queue_texture(texture_queue, sector.floor_texture_name);
-    mesh.texture_id = texture_id;
-
-    let name = texture_queue.get_name_from_id(texture_id.unwrap()).unwrap();
-    let texture = texture_loader.load(name).unwrap();
-
-    let w = 1.0 / texture.width() as f32;
-    let h = 1.0 / texture.height() as f32;
-
-    let dim = Vec2::new(w, -h);
-
-    for sub_sector in &sector.sub_sectors {
-        let mut verts = Vec::new();
-
-        for segment in 0..sub_sector.count {
-            let segment = map.segments[sub_sector.start + segment];
-            let start = map.vertex(segment.start_vertex);
-
-            let pos = Vec3::new(start.x, sector.ceiling_height, start.y);
-            let uv = Vec2::new(start.x, start.y) * dim;
-            let color = Vec4::new(1.0, 1.0, 1.0, 1.0);
-            let normal = Vec3::new(0.0, -1.0, 0.0);
-            verts.push(Vertex::new(pos, normal, uv, color));
-        }
-
-        util::cleanup_lines(&mut verts);
-        mesh.add_vertices(&verts, false);
-    }
-
-    let texture_id = queue_texture(texture_queue, sector.ceiling_texture_name);
-    mesh.texture_id = texture_id;
-
-    mesh
 }
 
 fn update_uv(
@@ -580,50 +638,6 @@ fn generate_sector_wall(
     (quads, slope_quads)
 }
 
-fn generate_sector_from_wad(
-    map: &wad::Map,
-    texture_loader: &TextureLoader,
-    texture_queue: &mut TextureQueue,
-    sector: &wad::Sector,
-) -> Sector {
-    let floor_mesh =
-        generate_sector_floor(map, texture_loader, texture_queue, sector);
-    let ceiling_mesh =
-        generate_sector_ceiling(map, texture_loader, texture_queue, sector);
-
-    let (wall_quads, slope_quads) =
-        generate_sector_wall(map, texture_loader, texture_queue, sector);
-
-    Sector::new(floor_mesh, ceiling_mesh, wall_quads, slope_quads)
-}
-
-fn generate_3d_map(
-    wad: &wad::Wad,
-    texture_loader: &TextureLoader,
-    texture_queue: &mut TextureQueue,
-    map_name: &str,
-) -> Map {
-    // Construct an map with map from the wad
-    let map = wad::Map::parse_from_wad(&wad, map_name)
-        .expect("Failed to load wad map");
-
-    let mut sectors = Vec::new();
-
-    for sector in &map.sectors {
-        let map_sector = generate_sector_from_wad(
-            &map,
-            texture_loader,
-            texture_queue,
-            sector,
-        );
-        sectors.push(map_sector);
-    }
-
-    println!("Num Sectors: {}", sectors.len());
-
-    Map::new(sectors)
-}
-
 fn write_map_gltf<P>(
     map: Map,
     texture_queue: &TextureQueue,
@@ -779,6 +793,10 @@ fn main() {
 
     let mut texture_queue = TextureQueue::new();
 
-    let map = generate_3d_map(&wad, &texture_loader, &mut texture_queue, map);
+    // Construct an map with map from the wad
+    let wad_map =
+        wad::Map::parse_from_wad(&wad, map).expect("Failed to load wad map");
+
+    let map = Map::gen_map(&wad_map, &texture_loader, &mut texture_queue);
     write_map_gltf(map, &texture_queue, &texture_loader, output);
 }

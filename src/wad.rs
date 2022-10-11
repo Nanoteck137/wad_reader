@@ -309,6 +309,8 @@ impl Segment {
 }
 
 pub struct Map {
+    pub name: String,
+
     pub vertices: Vec<Vertex>,
     pub gl_vertices: Vec<Vertex>,
 
@@ -323,6 +325,8 @@ pub struct Map {
 impl Map {
     pub fn parse_from_wad(wad: &Wad, map_name: &str) -> Result<Self> {
         let mut res = Self {
+            name: map_name.to_string(),
+
             vertices: Vec::new(),
             gl_vertices: Vec::new(),
 
