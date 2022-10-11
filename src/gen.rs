@@ -236,16 +236,18 @@ fn gen_diff_wall(
     let pos2 = Vec3::new(x2, front, y2);
     let pos3 = Vec3::new(x2, back, y2);
 
-    let (a, b, c) = if lower_quad {
-        (pos1, pos2, pos3)
-    } else {
-        (pos1, pos3, pos2)
-    };
+    let a = pos1;
+    let b = pos3;
+    let c = pos2;
 
     // TODO(patrik): Check the normal
     let normal = ((b - a).cross(c - a)).normalize();
 
-    let color = Vec4::new(1.0, 1.0, 1.0, 1.0);
+    let x = (normal.x * 0.5) + 0.5;
+    let y = (normal.y * 0.5) + 0.5;
+    let z = (normal.z * 0.5) + 0.5;
+    let color = Vec4::new(x, y, z, 1.0);
+    // let color = Vec4::new(1.0, 1.0, 1.0, 1.0);
 
     let dx = end.x - start.x;
     let dy = end.y - start.y;
