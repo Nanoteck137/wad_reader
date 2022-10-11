@@ -570,22 +570,26 @@ fn gen_slope(
     back: f32,
     diff: f32,
 ) -> Quad {
-    let pos0 = Vec3::new(start.x, front, start.y);
-    let pos1 = Vec3::new(end.x, front, end.y);
-    let pos2 = Vec3::new(end.x, back, end.y);
-    let pos3 = Vec3::new(start.x, back, start.y);
+    let x1 = start.x;
+    let y1 = start.y;
+    let x2 = end.x;
+    let y2 = end.y;
+
+    let pos0 = Vec3::new(x1, back, y1);
+    let pos1 = Vec3::new(x1, front, y1);
+    let pos2 = Vec3::new(x2, front, y2);
+    let pos3 = Vec3::new(x2, back, y2);
 
     let a = pos1;
     let b = pos3;
     let c = pos2;
 
     let normal = ((b - a).cross(c - a)).normalize();
-
-    // let x = (normal.x * 0.5) + 0.5;
-    // let y = (normal.y * 0.5) + 0.5;
-    // let z = (normal.z * 0.5) + 0.5;
-    // let color = Vec4::new(x, y, z, 1.0);
-    let color = Vec4::new(1.0, 1.0, 1.0, 1.0);
+    let x = (normal.x * 0.5) + 0.5;
+    let y = (normal.y * 0.5) + 0.5;
+    let z = (normal.z * 0.5) + 0.5;
+    let color = Vec4::new(x, y, z, 1.0);
+    //let color = Vec4::new(1.0, 1.0, 1.0, 1.0);
     let uv = Vec2::new(0.0, 0.0);
 
     let mut quad = Quad::new();
@@ -594,8 +598,13 @@ fn gen_slope(
     quad.points[2] = Vertex::new(pos2, normal, uv, color);
     quad.points[3] = Vertex::new(pos3, normal, uv, color);
 
-    quad.points[0].pos += normal * diff;
-    quad.points[1].pos += normal * diff;
+    if front < back {
+        quad.points[1].pos += normal * diff;
+        quad.points[2].pos += normal * diff;
+    } else {
+        quad.points[0].pos += normal * diff;
+        quad.points[3].pos += normal * diff;
+    }
 
     quad
 }
@@ -1967,10 +1976,17 @@ fn write_map_gltf<P>(
         for quad in &sector.slope_quads {
             slope_mesh.add_vertices(&quad.points, false);
         }
-        gltf.add_mesh_primitive(slope_mesh_id, &slope_mesh, 0);
+
+        let material_id = gltf.create_material(
+            format!("Sector #{}: Slope Mesh", sector_index),
+            Vec4::new(1.0, 1.0, 1.0, 1.0),
+            None,
+        );
+
+        gltf.add_mesh_primitive(slope_mesh_id, &slope_mesh, material_id);
 
         let extra_node_id = gltf.create_node(
-            format!("Sector #{}: Slope Mesh-colonly", sector_index),
+            format!("Sector #{}: Slope Mesh", sector_index),
             slope_mesh_id,
         );
         gltf.add_node_to_scene(scene_id, extra_node_id);
