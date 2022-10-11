@@ -3,7 +3,8 @@
 use std::path::Path;
 use std::fs::File;
 use std::io::Read;
-use crate::gltf;
+
+use crate::Vertex;
 
 pub fn read_binary_file<P>(path: P) -> Vec<u8>
 where
@@ -17,7 +18,7 @@ where
     result
 }
 
-pub fn triangulate(polygon: &[gltf::Vertex], clockwise: bool) -> Vec<u32> {
+pub fn triangulate(polygon: &[Vertex], clockwise: bool) -> Vec<u32> {
     let mut indices = Vec::new();
 
     let p0 = 0u32;
@@ -50,19 +51,15 @@ pub fn triangulate(polygon: &[gltf::Vertex], clockwise: bool) -> Vec<u32> {
     indices
 }
 
-pub fn line_angle(a: &gltf::Vertex, b: &gltf::Vertex) -> f32 {
+pub fn line_angle(a: &Vertex, b: &Vertex) -> f32 {
     (b.pos.z - a.pos.z).atan2(b.pos.x - a.pos.x)
 }
 
-pub fn point_on_line(
-    a: &gltf::Vertex,
-    b: &gltf::Vertex,
-    c: &gltf::Vertex,
-) -> bool {
+pub fn point_on_line(a: &Vertex, b: &Vertex, c: &Vertex) -> bool {
     return (line_angle(a, b) - line_angle(b, c)).abs() < 0.05;
 }
 
-pub fn cleanup_lines(verts: &mut Vec<gltf::Vertex>) {
+pub fn cleanup_lines(verts: &mut Vec<Vertex>) {
     for i in 0..verts.len() {
         let p1 = &verts[i % verts.len()];
         let p2 = &verts[i.wrapping_add(1) % verts.len()];
