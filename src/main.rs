@@ -1174,8 +1174,7 @@ fn write_map_gltf<P>(
     }
 
     let data = gltf.write_model();
-    let mut file = File::create(output_file).unwrap();
-    file.write_all(&data).unwrap();
+    util::write_binary_file(output_file, &data);
 }
 
 fn main() {

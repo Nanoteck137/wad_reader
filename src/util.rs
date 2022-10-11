@@ -2,7 +2,7 @@
 
 use std::path::Path;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Write};
 
 use crate::Vertex;
 
@@ -16,6 +16,14 @@ where
     file.read_to_end(&mut result).unwrap();
 
     result
+}
+
+pub fn write_binary_file<P>(path: P, data: &[u8])
+where
+    P: AsRef<Path>,
+{
+    let mut file = File::create(path).unwrap();
+    file.write_all(data).unwrap();
 }
 
 pub fn triangulate(polygon: &[Vertex], clockwise: bool) -> Vec<u32> {
