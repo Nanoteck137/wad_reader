@@ -1,4 +1,4 @@
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Default, Debug)]
 pub struct Vec2 {
     pub x: f32,
     pub y: f32,
@@ -65,7 +65,7 @@ impl std::ops::Mul<f32> for Vec2 {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Default, Debug)]
 pub struct Vec3 {
     pub x: f32,
     pub y: f32,
@@ -102,6 +102,14 @@ impl std::ops::Add<Vec3> for Vec3 {
         let z = self.z + rhs.z;
 
         Vec3::new(x, y, z)
+    }
+}
+
+impl std::ops::AddAssign<Vec3> for Vec3 {
+    fn add_assign(&mut self, rhs: Vec3) {
+        self.x += rhs.x;
+        self.y += rhs.y;
+        self.z += rhs.z;
     }
 }
 
@@ -153,7 +161,7 @@ impl std::ops::Div<f32> for Vec3 {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Default, Debug)]
 pub struct Vec4 {
     pub x: f32,
     pub y: f32,
@@ -167,7 +175,7 @@ impl Vec4 {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Default, Debug)]
 pub struct Vertex {
     pub pos: Vec3,
     pub normal: Vec3,

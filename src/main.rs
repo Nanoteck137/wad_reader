@@ -170,22 +170,13 @@ impl Mesh {
         }
     }
 
-    fn add_vertices(
-        &mut self,
-        mut vertices: Vec<Vertex>,
-        clockwise: bool,
-        cleanup: bool,
-    ) {
-        if cleanup {
-            util::cleanup_lines(&mut vertices);
-        }
-
+    fn add_vertices(&mut self, vertices: &[Vertex], clockwise: bool) {
         let triangles = util::triangulate(&vertices, clockwise);
 
         let index_offset = self.vertex_buffer.len();
 
-        for v in &vertices {
-            self.vertex_buffer.push(v.clone());
+        for v in vertices {
+            self.vertex_buffer.push(*v);
         }
 
         for i in &triangles {
@@ -194,22 +185,40 @@ impl Mesh {
     }
 }
 
+#[derive(Clone, Debug)]
+struct Quad {
+    points: [Vertex; 4],
+    texture_id: usize,
+}
+
+impl Quad {
+    fn new() -> Self {
+        Self {
+            points: [Default::default(); 4],
+            texture_id: 0,
+        }
+    }
+}
+
 struct Sector {
     floor_mesh: Mesh,
     ceiling_mesh: Mesh,
-    wall_meshes: HashMap<usize, Mesh>,
+    wall_quads: Vec<Quad>,
+    slope_quads: Vec<Quad>,
 }
 
 impl Sector {
     fn new(
         floor_mesh: Mesh,
         ceiling_mesh: Mesh,
-        wall_meshes: HashMap<usize, Mesh>,
+        wall_quads: Vec<Quad>,
+        slope_quads: Vec<Quad>,
     ) -> Self {
         Self {
             floor_mesh,
             ceiling_mesh,
-            wall_meshes,
+            wall_quads,
+            slope_quads,
         }
     }
 }
@@ -265,7 +274,7 @@ fn generate_sector_floor(
     let dim = Vec2::new(w, -h);
 
     for sub_sector in &sector.sub_sectors {
-        let mut vertices = Vec::new();
+        let mut verts = Vec::new();
 
         for segment in 0..sub_sector.count {
             let segment = map.segments[sub_sector.start + segment];
@@ -275,10 +284,11 @@ fn generate_sector_floor(
             let uv = Vec2::new(start.x, start.y) * dim;
             let color = Vec4::new(1.0, 1.0, 1.0, 1.0);
             let normal = Vec3::new(0.0, 1.0, 0.0);
-            vertices.push(Vertex::new(pos, normal, uv, color));
+            verts.push(Vertex::new(pos, normal, uv, color));
         }
 
-        mesh.add_vertices(vertices, true, true);
+        util::cleanup_lines(&mut verts);
+        mesh.add_vertices(&verts, true);
     }
 
     mesh
@@ -305,7 +315,7 @@ fn generate_sector_ceiling(
     let dim = Vec2::new(w, -h);
 
     for sub_sector in &sector.sub_sectors {
-        let mut vertices = Vec::new();
+        let mut verts = Vec::new();
 
         for segment in 0..sub_sector.count {
             let segment = map.segments[sub_sector.start + segment];
@@ -315,10 +325,11 @@ fn generate_sector_ceiling(
             let uv = Vec2::new(start.x, start.y) * dim;
             let color = Vec4::new(1.0, 1.0, 1.0, 1.0);
             let normal = Vec3::new(0.0, -1.0, 0.0);
-            vertices.push(Vertex::new(pos, normal, uv, color));
+            verts.push(Vertex::new(pos, normal, uv, color));
         }
 
-        mesh.add_vertices(vertices, false, true);
+        util::cleanup_lines(&mut verts);
+        mesh.add_vertices(&verts, false);
     }
 
     let texture_id = queue_texture(texture_queue, sector.ceiling_texture_name);
@@ -328,7 +339,7 @@ fn generate_sector_ceiling(
 }
 
 fn update_uv(
-    verts: &mut Vec<Vertex>,
+    quad: &mut Quad,
     texture: &Texture,
     length: f32,
     x_offset: f32,
@@ -337,8 +348,6 @@ fn update_uv(
     bottom: f32,
     lower_peg: bool,
 ) {
-    assert_eq!(verts.len(), 4);
-
     let height = (top - bottom).round();
 
     let mut y1 = y_offset;
@@ -351,27 +360,29 @@ fn update_uv(
 
     let dim = Vec2::new(texture.width as f32, texture.height as f32);
 
-    verts[0].uv = Vec2::new(x_offset, y1 + (top - verts[0].pos.y)) / dim;
-    verts[1].uv = Vec2::new(x_offset, y2 + (bottom - verts[1].pos.y)) / dim;
-    verts[2].uv =
-        Vec2::new(x_offset + length, y2 + (bottom - verts[2].pos.y)) / dim;
-    verts[3].uv =
-        Vec2::new(x_offset + length, y1 + (top - verts[3].pos.y)) / dim;
+    quad.points[0].uv =
+        Vec2::new(x_offset, y1 + (top - quad.points[0].pos.y)) / dim;
+    quad.points[1].uv =
+        Vec2::new(x_offset, y2 + (bottom - quad.points[1].pos.y)) / dim;
+    quad.points[2].uv =
+        Vec2::new(x_offset + length, y2 + (bottom - quad.points[2].pos.y))
+            / dim;
+    quad.points[3].uv =
+        Vec2::new(x_offset + length, y1 + (top - quad.points[3].pos.y)) / dim;
 }
 
-fn gen_normal_wall(
+fn create_normal_wall_quad(
     wad: &wad::Wad,
     texture_loader: &TextureLoader,
-    texture_queue: &TextureQueue,
-    texture_id: usize,
+    texture_queue: &mut TextureQueue,
     sector: &wad::Sector,
     linedef: &wad::Linedef,
     sidedef: &wad::Sidedef,
     start: wad::Vertex,
     end: wad::Vertex,
-) -> Vec<Vertex> {
-    let mut verts = Vec::new();
-
+) -> Quad {
+    let texture_id =
+        queue_texture(texture_queue, sidedef.middle_texture_name).unwrap();
     let name = texture_queue.get_name_from_id(texture_id).unwrap();
     let texture = texture_loader.load(wad, name).unwrap();
 
@@ -399,15 +410,17 @@ fn gen_normal_wall(
     let length = (dx * dx + dy * dy).sqrt();
 
     let uv = Vec2::new(0.0, 0.0);
-    verts.push(Vertex::new(pos0, normal, uv, color));
-    verts.push(Vertex::new(pos1, normal, uv, color));
-    verts.push(Vertex::new(pos2, normal, uv, color));
-    verts.push(Vertex::new(pos3, normal, uv, color));
+    let mut quad = Quad::new();
+    quad.texture_id = texture_id;
+    quad.points[0] = Vertex::new(pos0, normal, uv, color);
+    quad.points[1] = Vertex::new(pos1, normal, uv, color);
+    quad.points[2] = Vertex::new(pos2, normal, uv, color);
+    quad.points[3] = Vertex::new(pos3, normal, uv, color);
 
     let lower_peg = linedef.flags & wad::LINEDEF_FLAG_LOWER_TEXTURE_UNPEGGED
         == wad::LINEDEF_FLAG_LOWER_TEXTURE_UNPEGGED;
     update_uv(
-        &mut verts,
+        &mut quad,
         &texture,
         length,
         sidedef.x_offset as f32,
@@ -417,7 +430,7 @@ fn gen_normal_wall(
         lower_peg,
     );
 
-    verts
+    quad
 }
 
 fn gen_diff_wall(
@@ -434,9 +447,7 @@ fn gen_diff_wall(
     front: f32,
     back: f32,
     lower_quad: bool,
-) -> Vec<Vertex> {
-    let mut verts = Vec::new();
-
+) -> Quad {
     let name = texture_queue.get_name_from_id(texture_id).unwrap();
     let texture = texture_loader.load(wad, name).unwrap();
 
@@ -467,10 +478,12 @@ fn gen_diff_wall(
     let length = (dx * dx + dy * dy).sqrt();
 
     let uv = Vec2::new(0.0, 0.0);
-    verts.push(Vertex::new(pos0, normal, uv, color));
-    verts.push(Vertex::new(pos1, normal, uv, color));
-    verts.push(Vertex::new(pos2, normal, uv, color));
-    verts.push(Vertex::new(pos3, normal, uv, color));
+    let mut quad = Quad::new();
+    quad.texture_id = texture_id;
+    quad.points[0] = Vertex::new(pos0, normal, uv, color);
+    quad.points[1] = Vertex::new(pos1, normal, uv, color);
+    quad.points[2] = Vertex::new(pos2, normal, uv, color);
+    quad.points[3] = Vertex::new(pos3, normal, uv, color);
 
     if lower_quad {
         let x_offset = sidedef.x_offset as f32;
@@ -482,7 +495,7 @@ fn gen_diff_wall(
         }
 
         update_uv(
-            &mut verts, &texture, length, x_offset, y_offset, back, front,
+            &mut quad, &texture, length, x_offset, y_offset, back, front,
             false,
         );
     } else {
@@ -492,14 +505,13 @@ fn gen_diff_wall(
         let upper_peg = linedef.flags
             & wad::LINEDEF_FLAG_UPPER_TEXTURE_UNPEGGED
             == wad::LINEDEF_FLAG_UPPER_TEXTURE_UNPEGGED;
-        println!("Upper: {}", upper_peg);
         update_uv(
-            &mut verts, &texture, length, x_offset, y_offset, front, back,
+            &mut quad, &texture, length, x_offset, y_offset, back, front,
             !upper_peg,
         );
     }
 
-    verts
+    quad
 }
 
 fn gen_slope(
@@ -508,9 +520,8 @@ fn gen_slope(
     front: f32,
     back: f32,
     diff: f32,
-) -> Vec<Vertex> {
-    let mut verts = Vec::new();
-
+) -> Quad {
+    let pos0 = Vec3::new(start.x, front, start.y);
     let pos1 = Vec3::new(end.x, front, end.y);
     let pos2 = Vec3::new(end.x, back, end.y);
     let pos3 = Vec3::new(start.x, back, start.y);
@@ -526,24 +537,18 @@ fn gen_slope(
     // let z = (normal.z * 0.5) + 0.5;
     // let color = Vec4::new(x, y, z, 1.0);
     let color = Vec4::new(1.0, 1.0, 1.0, 1.0);
-
-    let pos = Vec3::new(start.x, front, start.y) + normal * diff;
     let uv = Vec2::new(0.0, 0.0);
-    verts.push(Vertex::new(pos, normal, uv, color));
 
-    let pos = Vec3::new(end.x, front, end.y) + normal * diff;
-    let uv = Vec2::new(0.0, 0.0);
-    verts.push(Vertex::new(pos, normal, uv, color));
+    let mut quad = Quad::new();
+    quad.points[0] = Vertex::new(pos0 + normal * diff, normal, uv, color);
+    quad.points[1] = Vertex::new(pos1 + normal * diff, normal, uv, color);
+    quad.points[2] = Vertex::new(pos2, normal, uv, color);
+    quad.points[3] = Vertex::new(pos3, normal, uv, color);
 
-    let pos = Vec3::new(end.x, back, end.y);
-    let uv = Vec2::new(0.0, 0.0);
-    verts.push(Vertex::new(pos, normal, uv, color));
+    quad.points[0].pos += normal * diff;
+    quad.points[1].pos += normal * diff;
 
-    let pos = Vec3::new(start.x, back, start.y);
-    let uv = Vec2::new(0.0, 0.0);
-    verts.push(Vertex::new(pos, normal, uv, color));
-
-    verts
+    quad
 }
 
 fn generate_sector_wall(
@@ -553,8 +558,9 @@ fn generate_sector_wall(
     texture_queue: &mut TextureQueue,
     sector: &wad::Sector,
     slope_mesh: &mut Mesh,
-) -> HashMap<usize, Mesh> {
-    let mut meshes: HashMap<usize, Mesh> = HashMap::new();
+) -> (Vec<Quad>, Vec<Quad>) {
+    let mut quads = Vec::new();
+    let mut slope_quads = Vec::new();
 
     for sub_sector in &sector.sub_sectors {
         for segment in 0..sub_sector.count {
@@ -572,17 +578,10 @@ fn generate_sector_wall(
                     if let Some(sidedef) = linedef.front_sidedef {
                         let sidedef = map.sidedefs[sidedef];
 
-                        let texture_id = queue_texture(
-                            texture_queue,
-                            sidedef.middle_texture_name,
-                        )
-                        .unwrap();
-
-                        let verts = gen_normal_wall(
+                        let quad = create_normal_wall_quad(
                             wad,
                             texture_loader,
                             texture_queue,
-                            texture_id,
                             sector,
                             &linedef,
                             &sidedef,
@@ -590,15 +589,7 @@ fn generate_sector_wall(
                             end,
                         );
 
-                        let mesh =
-                            if let Some(mesh) = meshes.get_mut(&texture_id) {
-                                mesh
-                            } else {
-                                meshes.insert(texture_id, Mesh::new());
-                                meshes.get_mut(&texture_id).unwrap()
-                            };
-
-                        mesh.add_vertices(verts, false, false)
+                        quads.push(quad);
                     }
                 }
 
@@ -625,9 +616,9 @@ fn generate_sector_wall(
                         let diff = max - min;
 
                         if diff <= 24.0 {
-                            let verts =
+                            let quad =
                                 gen_slope(start, end, front, back, diff);
-                            slope_mesh.add_vertices(verts, false, false);
+                            slope_quads.push(quad);
                         }
 
                         let texture_id = queue_texture(
@@ -636,7 +627,7 @@ fn generate_sector_wall(
                         )
                         .unwrap_or(0);
 
-                        let verts = gen_diff_wall(
+                        let quad = gen_diff_wall(
                             wad,
                             texture_loader,
                             texture_queue,
@@ -652,15 +643,7 @@ fn generate_sector_wall(
                             true,
                         );
 
-                        let mesh =
-                            if let Some(mesh) = meshes.get_mut(&texture_id) {
-                                mesh
-                            } else {
-                                meshes.insert(texture_id, Mesh::new());
-                                meshes.get_mut(&texture_id).unwrap()
-                            };
-
-                        mesh.add_vertices(verts, false, false)
+                        quads.push(quad);
                     }
 
                     // Generate the height difference
@@ -676,7 +659,7 @@ fn generate_sector_wall(
                         )
                         .unwrap_or(0);
 
-                        let verts = gen_diff_wall(
+                        let quad = gen_diff_wall(
                             wad,
                             texture_loader,
                             texture_queue,
@@ -687,27 +670,19 @@ fn generate_sector_wall(
                             back_sector,
                             start,
                             end,
-                            front,
                             back,
+                            front,
                             false,
                         );
 
-                        let mesh =
-                            if let Some(mesh) = meshes.get_mut(&texture_id) {
-                                mesh
-                            } else {
-                                meshes.insert(texture_id, Mesh::new());
-                                meshes.get_mut(&texture_id).unwrap()
-                            };
-
-                        mesh.add_vertices(verts, true, false)
+                        quads.push(quad);
                     }
                 }
             }
         }
     }
 
-    meshes
+    (quads, slope_quads)
 }
 
 fn generate_sector_from_wad(
@@ -727,7 +702,8 @@ fn generate_sector_from_wad(
         texture_queue,
         sector,
     );
-    let wall_meshes = generate_sector_wall(
+
+    let (wall_quads, slope_quads) = generate_sector_wall(
         wad,
         map,
         texture_loader,
@@ -736,7 +712,7 @@ fn generate_sector_from_wad(
         slope_mesh,
     );
 
-    Sector::new(floor_mesh, ceiling_mesh, wall_meshes)
+    Sector::new(floor_mesh, ceiling_mesh, wall_quads, slope_quads)
 }
 
 fn generate_3d_map(
@@ -1888,31 +1864,52 @@ fn write_map_gltf<P>(
 
         gltf.add_mesh_primitive(mesh_id, &sector.ceiling_mesh, material_id);
 
-        // DISABLE
-        for (texture_id, wall_mesh) in &sector.wall_meshes {
+        let mut wall_meshes: HashMap<usize, Mesh> = HashMap::new();
+        for quad in &sector.wall_quads {
+            let mesh =
+                if let Some(mesh) = wall_meshes.get_mut(&quad.texture_id) {
+                    mesh
+                } else {
+                    wall_meshes.insert(quad.texture_id, Mesh::new());
+                    wall_meshes.get_mut(&quad.texture_id).unwrap()
+                };
+
+            mesh.add_vertices(&quad.points, false);
+        }
+
+        for (texture_id, mesh) in wall_meshes {
             let material_id = gltf.create_material(
                 format!("Sector #{} Walls Tex #{}", sector_index, texture_id),
                 Vec4::new(1.0, 1.0, 1.0, 1.0),
                 Some(GltfTextureInfo {
-                    index: textures[*texture_id],
+                    index: textures[texture_id],
                     tex_coord: 0,
                 }),
             );
 
-            gltf.add_mesh_primitive(mesh_id, &wall_mesh, material_id);
+            gltf.add_mesh_primitive(mesh_id, &mesh, material_id);
         }
 
         let node_id =
             gltf.create_node(format!("Sector #{}-col", sector_index), mesh_id);
 
         gltf.add_node_to_scene(scene_id, node_id);
-    }
 
-    let slope_mesh_id = gltf.create_mesh("Slope Mesh".to_string());
-    gltf.add_mesh_primitive(slope_mesh_id, &map.slope_mesh, 0);
-    let extra_node_id =
-        gltf.create_node("Slope Mesh-colonly".to_string(), slope_mesh_id);
-    gltf.add_node_to_scene(scene_id, extra_node_id);
+        let slope_mesh_id =
+            gltf.create_mesh(format!("Sector #{}: Slope Mesh", sector_index));
+
+        let mut slope_mesh = Mesh::new();
+        for quad in &sector.slope_quads {
+            slope_mesh.add_vertices(&quad.points, false);
+        }
+        gltf.add_mesh_primitive(slope_mesh_id, &slope_mesh, 0);
+
+        let extra_node_id = gltf.create_node(
+            format!("Sector #{}: Slope Mesh-colonly", sector_index),
+            slope_mesh_id,
+        );
+        gltf.add_node_to_scene(scene_id, extra_node_id);
+    }
 
     let data = gltf.write_model();
     let mut file = File::create(output_file).unwrap();

@@ -2,7 +2,7 @@
 
 use crate::gltf;
 
-pub fn triangulate(polygon: &Vec<gltf::Vertex>, clockwise: bool) -> Vec<u32> {
+pub fn triangulate(polygon: &[gltf::Vertex], clockwise: bool) -> Vec<u32> {
     let mut indices = Vec::new();
 
     let p0 = 0u32;
