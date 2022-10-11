@@ -337,117 +337,113 @@ pub fn gen_walls(
     for sub_sector in &wad_sector.sub_sectors {
         for segment in 0..sub_sector.count {
             let segment = wad_map.segments[sub_sector.start + segment];
+            if segment.linedef == 0xffff {
+                continue;
+            }
 
-            // TODO(patrik): Refactor
+            let linedef = wad_map.linedefs[segment.linedef];
+            let line = linedef.line;
+            let start = wad_map.vertex(line.start_vertex);
+            let end = wad_map.vertex(line.end_vertex);
 
-            if segment.linedef != 0xffff {
-                let linedef = wad_map.linedefs[segment.linedef];
-                let line = linedef.line;
-                let start = wad_map.vertex(line.start_vertex);
-                let end = wad_map.vertex(line.end_vertex);
+            if linedef.flags & wad::LINEDEF_FLAG_TWO_SIDED
+                != wad::LINEDEF_FLAG_TWO_SIDED
+            {
+                if let Some(sidedef) = linedef.front_sidedef {
+                    let sidedef = wad_map.sidedefs[sidedef];
 
-                if linedef.flags & wad::LINEDEF_FLAG_TWO_SIDED
-                    != wad::LINEDEF_FLAG_TWO_SIDED
-                {
-                    if let Some(sidedef) = linedef.front_sidedef {
-                        let sidedef = wad_map.sidedefs[sidedef];
+                    let quad = create_normal_wall_quad(
+                        texture_loader,
+                        texture_queue,
+                        wad_sector,
+                        &linedef,
+                        &sidedef,
+                        start,
+                        end,
+                    );
 
-                        let quad = create_normal_wall_quad(
-                            texture_loader,
-                            texture_queue,
-                            wad_sector,
-                            &linedef,
-                            &sidedef,
-                            start,
-                            end,
-                        );
+                    quads.push(quad);
+                }
+            }
 
-                        quads.push(quad);
+            if linedef.front_sidedef.is_some()
+                && linedef.back_sidedef.is_some()
+            {
+                let front_sidedef = linedef.front_sidedef.unwrap();
+                let front_sidedef = wad_map.sidedefs[front_sidedef];
+
+                let back_sidedef = linedef.back_sidedef.unwrap();
+                let back_sidedef = wad_map.sidedefs[back_sidedef];
+
+                let front_sector = &wad_map.sectors[front_sidedef.sector];
+                let back_sector = &wad_map.sectors[back_sidedef.sector];
+
+                // Generate the floor difference
+                if front_sector.floor_height != back_sector.floor_height {
+                    let front = front_sector.floor_height;
+                    let back = back_sector.floor_height;
+
+                    let min = front.min(back);
+                    let max = front.max(back);
+
+                    let diff = max - min;
+
+                    if diff <= 24.0 {
+                        let quad = gen_slope(start, end, front, back, diff);
+                        slope_quads.push(quad);
                     }
+
+                    let texture_id = queue_texture(
+                        texture_queue,
+                        front_sidedef.lower_texture_name,
+                    )
+                    .unwrap_or(0);
+
+                    let quad = gen_diff_wall(
+                        texture_loader,
+                        texture_queue,
+                        texture_id,
+                        &linedef,
+                        &front_sidedef,
+                        front_sector,
+                        back_sector,
+                        start,
+                        end,
+                        front,
+                        back,
+                        true,
+                    );
+
+                    quads.push(quad);
                 }
 
-                if linedef.front_sidedef.is_some()
-                    && linedef.back_sidedef.is_some()
-                {
-                    let front_sidedef = linedef.front_sidedef.unwrap();
-                    let front_sidedef = wad_map.sidedefs[front_sidedef];
+                // Generate the height difference
+                if front_sector.ceiling_height != back_sector.ceiling_height {
+                    let front = front_sector.ceiling_height;
+                    let back = back_sector.ceiling_height;
 
-                    let back_sidedef = linedef.back_sidedef.unwrap();
-                    let back_sidedef = wad_map.sidedefs[back_sidedef];
+                    let texture_id = queue_texture(
+                        texture_queue,
+                        front_sidedef.upper_texture_name,
+                    )
+                    .unwrap_or(0);
 
-                    let front_sector = &wad_map.sectors[front_sidedef.sector];
-                    let back_sector = &wad_map.sectors[back_sidedef.sector];
+                    let quad = gen_diff_wall(
+                        texture_loader,
+                        texture_queue,
+                        texture_id,
+                        &linedef,
+                        &front_sidedef,
+                        front_sector,
+                        back_sector,
+                        start,
+                        end,
+                        back,
+                        front,
+                        false,
+                    );
 
-                    // Generate the floor difference
-                    if front_sector.floor_height != back_sector.floor_height {
-                        let front = front_sector.floor_height;
-                        let back = back_sector.floor_height;
-
-                        let min = front.min(back);
-                        let max = front.max(back);
-
-                        let diff = max - min;
-
-                        if diff <= 24.0 {
-                            let quad =
-                                gen_slope(start, end, front, back, diff);
-                            slope_quads.push(quad);
-                        }
-
-                        let texture_id = queue_texture(
-                            texture_queue,
-                            front_sidedef.lower_texture_name,
-                        )
-                        .unwrap_or(0);
-
-                        let quad = gen_diff_wall(
-                            texture_loader,
-                            texture_queue,
-                            texture_id,
-                            &linedef,
-                            &front_sidedef,
-                            front_sector,
-                            back_sector,
-                            start,
-                            end,
-                            front,
-                            back,
-                            true,
-                        );
-
-                        quads.push(quad);
-                    }
-
-                    // Generate the height difference
-                    if front_sector.ceiling_height
-                        != back_sector.ceiling_height
-                    {
-                        let front = front_sector.ceiling_height;
-                        let back = back_sector.ceiling_height;
-
-                        let texture_id = queue_texture(
-                            texture_queue,
-                            front_sidedef.upper_texture_name,
-                        )
-                        .unwrap_or(0);
-
-                        let quad = gen_diff_wall(
-                            texture_loader,
-                            texture_queue,
-                            texture_id,
-                            &linedef,
-                            &front_sidedef,
-                            front_sector,
-                            back_sector,
-                            start,
-                            end,
-                            back,
-                            front,
-                            false,
-                        );
-
-                        quads.push(quad);
-                    }
+                    quads.push(quad);
                 }
             }
         }
