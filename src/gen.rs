@@ -152,8 +152,8 @@ fn update_quad_uvs(
     texture: &Texture,
     length: f32,
     offset: Vec2,
-    top: f32,
     bottom: f32,
+    top: f32,
     lower_peg: bool,
 ) {
     let height = (top - bottom).round();
@@ -210,8 +210,8 @@ fn create_normal_wall_quad(
         &texture,
         length,
         offset,
-        sector.ceiling_height,
         sector.floor_height,
+        sector.ceiling_height,
         lower_peg,
     );
 
@@ -251,7 +251,7 @@ fn gen_diff_wall(
         }
 
         update_quad_uvs(
-            &mut quad, &texture, length, offset, back, front, false,
+            &mut quad, &texture, length, offset, front, back, false,
         );
     } else {
         let offset =
@@ -261,7 +261,7 @@ fn gen_diff_wall(
             .flags
             .contains(wad::LinedefFlags::UPPER_TEXTURE_UNPEGGED);
         update_quad_uvs(
-            &mut quad, &texture, length, offset, back, front, !upper_peg,
+            &mut quad, &texture, length, offset, front, back, !upper_peg,
         );
     }
 
