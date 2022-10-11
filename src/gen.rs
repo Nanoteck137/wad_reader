@@ -4,36 +4,54 @@ use crate::texture::{Texture, TextureLoader, TextureQueue};
 use crate::polygon::{Mesh, Quad, Vertex};
 use crate::math::{Vec2, Vec3, Vec4};
 
-fn queue_texture(
-    texture_queue: &mut TextureQueue,
-    texture_name: [u8; 8],
-) -> Option<usize> {
-    let null_pos = texture_name
-        .iter()
-        .position(|&c| c == 0)
-        .unwrap_or(texture_name.len());
-    let texture_name = &texture_name[..null_pos];
-    let texture_name = std::str::from_utf8(&texture_name)
-        .expect("Failed to convert floor texture name to str");
-    let texture_name = String::from(texture_name);
+pub struct Context {
+    pub texture_loader: TextureLoader,
+    pub texture_queue: TextureQueue,
+}
 
-    texture_queue.enqueue(texture_name)
+impl Context {
+    pub fn new(
+        texture_loader: TextureLoader,
+        texture_queue: TextureQueue,
+    ) -> Self {
+        Self {
+            texture_loader,
+            texture_queue,
+        }
+    }
+
+    fn queue_texture(&mut self, texture_name: [u8; 8]) -> Option<usize> {
+        let null_pos = texture_name
+            .iter()
+            .position(|&c| c == 0)
+            .unwrap_or(texture_name.len());
+        let texture_name = &texture_name[..null_pos];
+        let texture_name = std::str::from_utf8(&texture_name)
+            .expect("Failed to convert texture name to str");
+        let texture_name = String::from(texture_name);
+
+        self.texture_queue.enqueue(texture_name)
+    }
+
+    fn get_texture_from_id(&self, texture_id: usize) -> Option<&Texture> {
+        // TODO(patrik): Change this
+        let name = self.texture_queue.get_name_from_id(texture_id).unwrap();
+        self.texture_loader.load(name)
+    }
 }
 
 pub fn gen_floor(
+    context: &mut Context,
     wad_map: &wad::Map,
     wad_sector: &wad::Sector,
-    texture_loader: &TextureLoader,
-    texture_queue: &mut TextureQueue,
 ) -> Mesh {
     let mut mesh = Mesh::new();
 
-    let texture_id =
-        queue_texture(texture_queue, wad_sector.floor_texture_name);
+    let texture_id = context.queue_texture(wad_sector.floor_texture_name);
     mesh.texture_id = texture_id;
 
-    let name = texture_queue.get_name_from_id(texture_id.unwrap()).unwrap();
-    let texture = texture_loader.load(name).unwrap();
+    // TODO(patrik): Replace unwrap with default texture
+    let texture = context.get_texture_from_id(texture_id.unwrap()).unwrap();
 
     let w = 1.0 / texture.width() as f32;
     let h = 1.0 / texture.height() as f32;
@@ -62,19 +80,16 @@ pub fn gen_floor(
 }
 
 pub fn gen_ceiling(
+    context: &mut Context,
     wad_map: &wad::Map,
     wad_sector: &wad::Sector,
-    texture_loader: &TextureLoader,
-    texture_queue: &mut TextureQueue,
 ) -> Mesh {
     let mut mesh = Mesh::new();
 
-    let texture_id =
-        queue_texture(texture_queue, wad_sector.ceiling_texture_name);
+    let texture_id = context.queue_texture(wad_sector.ceiling_texture_name);
     mesh.texture_id = texture_id;
 
-    let name = texture_queue.get_name_from_id(texture_id.unwrap()).unwrap();
-    let texture = texture_loader.load(name).unwrap();
+    let texture = context.get_texture_from_id(texture_id.unwrap()).unwrap();
 
     let w = 1.0 / texture.width() as f32;
     let h = 1.0 / texture.height() as f32;
@@ -139,18 +154,15 @@ fn update_uv(
 }
 
 fn create_normal_wall_quad(
-    texture_loader: &TextureLoader,
-    texture_queue: &mut TextureQueue,
+    context: &mut Context,
     sector: &wad::Sector,
     linedef: &wad::Linedef,
     sidedef: &wad::Sidedef,
     start: wad::Vertex,
     end: wad::Vertex,
 ) -> Quad {
-    let texture_id =
-        queue_texture(texture_queue, sidedef.middle_texture_name).unwrap();
-    let name = texture_queue.get_name_from_id(texture_id).unwrap();
-    let texture = texture_loader.load(name).unwrap();
+    let texture_id = context.queue_texture(sidedef.middle_texture_name);
+    let texture = context.get_texture_from_id(texture_id.unwrap()).unwrap();
 
     let x1 = start.x;
     let y1 = start.y;
@@ -177,7 +189,7 @@ fn create_normal_wall_quad(
 
     let uv = Vec2::new(0.0, 0.0);
     let mut quad = Quad::new();
-    quad.texture_id = texture_id;
+    quad.texture_id = texture_id.unwrap();
     quad.points[0] = Vertex::new(pos0, normal, uv, color);
     quad.points[1] = Vertex::new(pos1, normal, uv, color);
     quad.points[2] = Vertex::new(pos2, normal, uv, color);
@@ -200,8 +212,7 @@ fn create_normal_wall_quad(
 }
 
 fn gen_diff_wall(
-    texture_loader: &TextureLoader,
-    texture_queue: &TextureQueue,
+    context: &mut Context,
     texture_id: usize,
     linedef: &wad::Linedef,
     sidedef: &wad::Sidedef,
@@ -213,8 +224,7 @@ fn gen_diff_wall(
     back: f32,
     lower_quad: bool,
 ) -> Quad {
-    let name = texture_queue.get_name_from_id(texture_id).unwrap();
-    let texture = texture_loader.load(name).unwrap();
+    let texture = context.get_texture_from_id(texture_id).unwrap();
 
     let x1 = start.x;
     let y1 = start.y;
@@ -326,10 +336,9 @@ fn gen_slope(
 }
 
 pub fn gen_walls(
+    context: &mut Context,
     wad_map: &wad::Map,
     wad_sector: &wad::Sector,
-    texture_loader: &TextureLoader,
-    texture_queue: &mut TextureQueue,
 ) -> (Vec<Quad>, Vec<Quad>) {
     let mut quads = Vec::new();
     let mut slope_quads = Vec::new();
@@ -353,13 +362,7 @@ pub fn gen_walls(
                     let sidedef = wad_map.sidedefs[sidedef];
 
                     let quad = create_normal_wall_quad(
-                        texture_loader,
-                        texture_queue,
-                        wad_sector,
-                        &linedef,
-                        &sidedef,
-                        start,
-                        end,
+                        context, wad_sector, &linedef, &sidedef, start, end,
                     );
 
                     quads.push(quad);
@@ -393,15 +396,13 @@ pub fn gen_walls(
                         slope_quads.push(quad);
                     }
 
-                    let texture_id = queue_texture(
-                        texture_queue,
-                        front_sidedef.lower_texture_name,
-                    )
-                    .unwrap_or(0);
+                    // TODO(patrik): Remove unwrap_or with default texture
+                    let texture_id = context
+                        .queue_texture(front_sidedef.lower_texture_name)
+                        .unwrap_or(0);
 
                     let quad = gen_diff_wall(
-                        texture_loader,
-                        texture_queue,
+                        context,
                         texture_id,
                         &linedef,
                         &front_sidedef,
@@ -422,15 +423,13 @@ pub fn gen_walls(
                     let front = front_sector.ceiling_height;
                     let back = back_sector.ceiling_height;
 
-                    let texture_id = queue_texture(
-                        texture_queue,
-                        front_sidedef.upper_texture_name,
-                    )
-                    .unwrap_or(0);
+                    // TODO(patrik): Remove unwrap_or with default texture
+                    let texture_id = context
+                        .queue_texture(front_sidedef.upper_texture_name)
+                        .unwrap_or(0);
 
                     let quad = gen_diff_wall(
-                        texture_loader,
-                        texture_queue,
+                        context,
                         texture_id,
                         &linedef,
                         &front_sidedef,

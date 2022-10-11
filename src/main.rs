@@ -63,23 +63,16 @@ impl Sector {
     }
 
     fn gen_sector(
+        context: &mut gen::Context,
         wad_map: &wad::Map,
         wad_sector: &wad::Sector,
-        texture_loader: &TextureLoader,
-        texture_queue: &mut TextureQueue,
     ) -> Self {
-        let floor_mesh =
-            gen::gen_floor(wad_map, wad_sector, texture_loader, texture_queue);
+        let floor_mesh = gen::gen_floor(context, wad_map, wad_sector);
 
-        let ceiling_mesh = gen::gen_ceiling(
-            wad_map,
-            wad_sector,
-            texture_loader,
-            texture_queue,
-        );
+        let ceiling_mesh = gen::gen_ceiling(context, wad_map, wad_sector);
 
         let (wall_quads, slope_quads) =
-            gen::gen_walls(wad_map, wad_sector, texture_loader, texture_queue);
+            gen::gen_walls(context, wad_map, wad_sector);
 
         Sector::new(floor_mesh, ceiling_mesh, wall_quads, slope_quads)
     }
@@ -94,20 +87,11 @@ impl Map {
         Self { sectors }
     }
 
-    fn gen_map(
-        wad_map: &wad::Map,
-        texture_loader: &TextureLoader,
-        texture_queue: &mut TextureQueue,
-    ) -> Self {
+    fn gen_map(context: &mut gen::Context, wad_map: &wad::Map) -> Self {
         let mut sectors = Vec::new();
 
         for wad_sector in &wad_map.sectors {
-            let map_sector = Sector::gen_sector(
-                &wad_map,
-                wad_sector,
-                texture_loader,
-                texture_queue,
-            );
+            let map_sector = Sector::gen_sector(context, &wad_map, wad_sector);
 
             sectors.push(map_sector);
         }
@@ -116,12 +100,8 @@ impl Map {
     }
 }
 
-fn write_map_gltf<P>(
-    map: Map,
-    texture_queue: &TextureQueue,
-    texture_loader: &TextureLoader,
-    output_file: P,
-) where
+fn write_map_gltf<P>(context: &gen::Context, map: Map, output_file: P)
+where
     P: AsRef<Path>,
 {
     let mut gltf = Gltf::new();
@@ -132,8 +112,8 @@ fn write_map_gltf<P>(
     let texture_sampler = gltf.create_sampler("Default Sampler".to_string());
 
     let mut textures = Vec::new();
-    for t in &texture_queue.textures {
-        if let Some(texture) = texture_loader.load(&t) {
+    for t in &context.texture_queue.textures {
+        if let Some(texture) = context.texture_loader.load(&t) {
             let png = util::write_texture_to_png(texture);
             let image_id = gltf.create_image(t.clone(), &png);
             let texture_id =
@@ -269,12 +249,14 @@ fn main() {
 
     println!("Converting '{}' to mime map", map);
 
-    let mut texture_queue = TextureQueue::new();
+    let texture_queue = TextureQueue::new();
 
     // Construct an map with map from the wad
     let wad_map =
         wad::Map::parse_from_wad(&wad, map).expect("Failed to load wad map");
 
-    let map = Map::gen_map(&wad_map, &texture_loader, &mut texture_queue);
-    write_map_gltf(map, &texture_queue, &texture_loader, output);
+    let mut context = gen::Context::new(texture_loader, texture_queue);
+
+    let map = Map::gen_map(&mut context, &wad_map);
+    write_map_gltf(&context, map, output);
 }
