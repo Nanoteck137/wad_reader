@@ -274,15 +274,11 @@ impl Sector {
 
 struct Map {
     sectors: Vec<Sector>,
-    slope_mesh: Mesh,
 }
 
 impl Map {
-    fn new(sectors: Vec<Sector>, slope_mesh: Mesh) -> Self {
-        Self {
-            sectors,
-            slope_mesh,
-        }
+    fn new(sectors: Vec<Sector>) -> Self {
+        Self { sectors }
     }
 }
 
@@ -615,7 +611,6 @@ fn generate_sector_wall(
     texture_loader: &TextureLoader,
     texture_queue: &mut TextureQueue,
     sector: &wad::Sector,
-    slope_mesh: &mut Mesh,
 ) -> (Vec<Quad>, Vec<Quad>) {
     let mut quads = Vec::new();
     let mut slope_quads = Vec::new();
@@ -749,7 +744,6 @@ fn generate_sector_from_wad(
     texture_loader: &TextureLoader,
     texture_queue: &mut TextureQueue,
     sector: &wad::Sector,
-    slope_mesh: &mut Mesh,
 ) -> Sector {
     let floor_mesh =
         generate_sector_floor(wad, map, texture_loader, texture_queue, sector);
@@ -761,14 +755,8 @@ fn generate_sector_from_wad(
         sector,
     );
 
-    let (wall_quads, slope_quads) = generate_sector_wall(
-        wad,
-        map,
-        texture_loader,
-        texture_queue,
-        sector,
-        slope_mesh,
-    );
+    let (wall_quads, slope_quads) =
+        generate_sector_wall(wad, map, texture_loader, texture_queue, sector);
 
     Sector::new(floor_mesh, ceiling_mesh, wall_quads, slope_quads)
 }
@@ -789,8 +777,6 @@ fn generate_3d_map(
     //     generate_sector_from_wad(&map, texture_queue, &map.sectors[50]);
     // sectors.push(map_sector);
 
-    let mut slope_mesh = Mesh::new();
-
     for sector in &map.sectors {
         let map_sector = generate_sector_from_wad(
             wad,
@@ -798,14 +784,13 @@ fn generate_3d_map(
             texture_loader,
             texture_queue,
             sector,
-            &mut slope_mesh,
         );
         sectors.push(map_sector);
     }
 
     println!("Num Sectors: {}", sectors.len());
 
-    Map::new(sectors, slope_mesh)
+    Map::new(sectors)
 }
 
 #[derive(Parser, Debug)]
