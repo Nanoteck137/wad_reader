@@ -167,8 +167,8 @@ where
             let material_id = gltf.create_material(
                 format!("Sector #{} Walls Tex #{}", sector_index, texture_id),
                 Vec4::new(1.0, 1.0, 1.0, 1.0),
-                // Some(GltfTextureInfo::new(textures[texture_id])),
-                None,
+                Some(GltfTextureInfo::new(textures[texture_id])),
+                // None,
             );
 
             gltf.add_mesh_primitive(mesh_id, &mesh, material_id);

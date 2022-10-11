@@ -117,6 +117,36 @@ pub fn gen_ceiling(
     mesh
 }
 
+fn create_quad(p1: Vec2, p2: Vec2, bottom: f32, top: f32) -> Quad {
+    let pos0 = Vec3::new(p1.x, top, p1.y);
+    let pos1 = Vec3::new(p1.x, bottom, p1.y);
+    let pos2 = Vec3::new(p2.x, bottom, p2.y);
+    let pos3 = Vec3::new(p2.x, top, p2.y);
+
+    let a = pos1;
+    let b = pos3;
+    let c = pos2;
+
+    // TODO(patrik): Check the normal
+    let normal = ((b - a).cross(c - a)).normalize();
+
+    // let x = (normal.x * 0.5) + 0.5;
+    // let y = (normal.y * 0.5) + 0.5;
+    // let z = (normal.z * 0.5) + 0.5;
+    // let color = Vec4::new(x, y, z, 1.0);
+
+    let color = Vec4::new(1.0, 1.0, 1.0, 1.0);
+    let uv = Vec2::new(0.0, 0.0);
+
+    let mut quad = Quad::new();
+    quad.points[0] = Vertex::new(pos0, normal, uv, color);
+    quad.points[1] = Vertex::new(pos1, normal, uv, color);
+    quad.points[2] = Vertex::new(pos2, normal, uv, color);
+    quad.points[3] = Vertex::new(pos3, normal, uv, color);
+
+    quad
+}
+
 fn update_quad_uvs(
     quad: &mut Quad,
     texture: &Texture,
@@ -168,11 +198,9 @@ fn create_normal_wall_quad(
     let end = Vec2::new(end.x, end.y);
     let mut quad =
         create_quad(start, end, sector.floor_height, sector.ceiling_height);
+    quad.texture_id = texture_id.unwrap();
 
-    let dx = end.x - start.x;
-    let dy = end.y - start.y;
-
-    let length = (dx * dx + dy * dy).sqrt();
+    let length = (end - start).length();
 
     let lower_peg = linedef.flags & wad::LINEDEF_FLAG_LOWER_TEXTURE_UNPEGGED
         == wad::LINEDEF_FLAG_LOWER_TEXTURE_UNPEGGED;
@@ -186,41 +214,6 @@ fn create_normal_wall_quad(
         sector.floor_height,
         lower_peg,
     );
-
-    quad
-}
-
-fn create_quad(p1: Vec2, p2: Vec2, bottom: f32, top: f32) -> Quad {
-    let pos0 = Vec3::new(p1.x, top, p1.y);
-    let pos1 = Vec3::new(p1.x, bottom, p1.y);
-    let pos2 = Vec3::new(p2.x, bottom, p2.y);
-    let pos3 = Vec3::new(p2.x, top, p2.y);
-
-    let a = pos1;
-    let b = pos3;
-    let c = pos2;
-
-    // TODO(patrik): Check the normal
-    let normal = ((b - a).cross(c - a)).normalize();
-
-    let x = (normal.x * 0.5) + 0.5;
-    let y = (normal.y * 0.5) + 0.5;
-    let z = (normal.z * 0.5) + 0.5;
-    let color = Vec4::new(x, y, z, 1.0);
-
-    // let color = Vec4::new(1.0, 1.0, 1.0, 1.0);
-
-    // let dx = p2.x - p1.x;
-    // let dy = p2.y - p1.y;
-    //
-    // let length = (dx * dx + dy * dy).sqrt();
-
-    let uv = Vec2::new(0.0, 0.0);
-    let mut quad = Quad::new();
-    quad.points[0] = Vertex::new(pos0, normal, uv, color);
-    quad.points[1] = Vertex::new(pos1, normal, uv, color);
-    quad.points[2] = Vertex::new(pos2, normal, uv, color);
-    quad.points[3] = Vertex::new(pos3, normal, uv, color);
 
     quad
 }
@@ -243,11 +236,9 @@ fn gen_diff_wall(
     let start = Vec2::new(start.x, start.y);
     let end = Vec2::new(end.x, end.y);
     let mut quad = create_quad(start, end, front, back);
+    quad.texture_id = texture_id;
 
-    let dx = end.x - start.x;
-    let dy = end.y - start.y;
-
-    let length = (dx * dx + dy * dy).sqrt();
+    let length = (end - start).length();
 
     if lower_quad {
         let x_offset = sidedef.x_offset as f32;
@@ -283,19 +274,20 @@ fn gen_slope(
     end: wad::Vertex,
     front: f32,
     back: f32,
-    diff: f32,
+    height: f32,
 ) -> Quad {
     let start = Vec2::new(start.x, start.y);
     let end = Vec2::new(end.x, end.y);
     let mut quad = create_quad(start, end, front, back);
+
     let normal = quad.points[0].normal;
 
     if front < back {
-        quad.points[1].pos += normal * diff;
-        quad.points[2].pos += normal * diff;
+        quad.points[1].pos += normal * height;
+        quad.points[2].pos += normal * height;
     } else {
-        quad.points[0].pos += normal * diff;
-        quad.points[3].pos += normal * diff;
+        quad.points[0].pos += normal * height;
+        quad.points[3].pos += normal * height;
     }
 
     quad
@@ -351,14 +343,10 @@ pub fn gen_walls(
                 if front_sector.floor_height != back_sector.floor_height {
                     let front = front_sector.floor_height;
                     let back = back_sector.floor_height;
+                    let height = (front - back).abs();
 
-                    let min = front.min(back);
-                    let max = front.max(back);
-
-                    let diff = max - min;
-
-                    if diff <= 24.0 {
-                        let quad = gen_slope(start, end, front, back, diff);
+                    if height <= 24.0 {
+                        let quad = gen_slope(start, end, front, back, height);
                         slope_quads.push(quad);
                     }
 
