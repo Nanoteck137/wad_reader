@@ -8,6 +8,10 @@ impl Vec2 {
     pub const fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
+
+    pub fn length(&self) -> f32 {
+        (self.x * self.x + self.y * self.y).sqrt()
+    }
 }
 
 impl std::ops::Add<Vec2> for Vec2 {
@@ -16,6 +20,17 @@ impl std::ops::Add<Vec2> for Vec2 {
     fn add(self, rhs: Vec2) -> Vec2 {
         let x = self.x + rhs.x;
         let y = self.y + rhs.y;
+
+        Vec2::new(x, y)
+    }
+}
+
+impl std::ops::Sub<Vec2> for Vec2 {
+    type Output = Vec2;
+
+    fn sub(self, rhs: Vec2) -> Vec2 {
+        let x = self.x - rhs.x;
+        let y = self.y - rhs.y;
 
         Vec2::new(x, y)
     }
@@ -77,11 +92,12 @@ impl Vec3 {
         Self { x, y, z }
     }
 
-    pub fn normalize(&self) -> Self {
-        let length =
-            ((self.x * self.x) + (self.y * self.y) + (self.z * self.z)).sqrt();
+    pub fn length(&self) -> f32 {
+        (self.x * self.x + self.y * self.y + self.z * self.z).sqrt()
+    }
 
-        *self / length
+    pub fn normalize(&self) -> Self {
+        *self / self.length()
     }
 
     pub fn cross(&self, other: Self) -> Self {
