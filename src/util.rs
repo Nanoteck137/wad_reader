@@ -2,9 +2,10 @@
 
 use std::path::Path;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{Read, Write, BufWriter};
 
 use crate::Vertex;
+use crate::texture::Texture;
 
 pub fn read_binary_file<P>(path: P) -> Vec<u8>
 where
@@ -24,6 +25,26 @@ where
 {
     let mut file = File::create(path).unwrap();
     file.write_all(data).unwrap();
+}
+
+pub fn write_texture_to_png(texture: &Texture) -> Vec<u8> {
+    let mut result = Vec::new();
+    {
+        let ref mut file_writer = BufWriter::new(&mut result);
+
+        let mut encoder = png::Encoder::new(
+            file_writer,
+            texture.width() as u32,
+            texture.height() as u32,
+        );
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&texture.pixels()).unwrap();
+    }
+
+    result
 }
 
 pub fn triangulate(polygon: &[Vertex], clockwise: bool) -> Vec<u32> {
