@@ -7,9 +7,11 @@ use wad::Wad;
 use math::{Vec2, Vec3, Vec4};
 use texture::{TextureLoader, TextureQueue, Texture};
 use gltf::{Gltf, GltfTextureInfo};
+use polygon::{Quad, Mesh, Vertex};
 
 mod gltf;
 mod math;
+mod polygon;
 mod texture;
 mod util;
 mod wad;
@@ -51,70 +53,6 @@ fn queue_texture(
     let texture_name = String::from(texture_name);
 
     texture_queue.enqueue(texture_name)
-}
-
-#[derive(Copy, Clone, Default, Debug)]
-pub struct Vertex {
-    pub pos: Vec3,
-    pub normal: Vec3,
-    pub uv: Vec2,
-    pub color: Vec4,
-}
-
-impl Vertex {
-    pub fn new(pos: Vec3, normal: Vec3, uv: Vec2, color: Vec4) -> Self {
-        Self {
-            pos,
-            normal,
-            uv,
-            color,
-        }
-    }
-}
-
-pub struct Mesh {
-    vertex_buffer: Vec<Vertex>,
-    index_buffer: Vec<u32>,
-    texture_id: Option<usize>,
-}
-
-impl Mesh {
-    fn new() -> Self {
-        Self {
-            vertex_buffer: Vec::new(),
-            index_buffer: Vec::new(),
-            texture_id: None,
-        }
-    }
-
-    fn add_vertices(&mut self, vertices: &[Vertex], clockwise: bool) {
-        let triangles = util::triangulate(&vertices, clockwise);
-
-        let index_offset = self.vertex_buffer.len();
-
-        for v in vertices {
-            self.vertex_buffer.push(*v);
-        }
-
-        for i in &triangles {
-            self.index_buffer.push(i + index_offset as u32);
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-struct Quad {
-    points: [Vertex; 4],
-    texture_id: usize,
-}
-
-impl Quad {
-    fn new() -> Self {
-        Self {
-            points: [Default::default(); 4],
-            texture_id: 0,
-        }
-    }
 }
 
 struct Sector {

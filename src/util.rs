@@ -4,7 +4,7 @@ use std::path::Path;
 use std::fs::File;
 use std::io::{Read, Write, BufWriter};
 
-use crate::Vertex;
+use crate::polygon::Vertex;
 use crate::texture::Texture;
 
 pub fn read_binary_file<P>(path: P) -> Vec<u8>
