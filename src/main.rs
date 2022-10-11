@@ -1836,7 +1836,6 @@ impl Gltf {
 }
 
 fn write_map_gltf<P>(
-    wad: &Wad,
     map: Map,
     texture_queue: &TextureQueue,
     texture_loader: &TextureLoader,
@@ -2014,5 +2013,5 @@ fn main() {
     let mut texture_queue = TextureQueue::new();
 
     let map = generate_3d_map(&wad, &texture_loader, &mut texture_queue, map);
-    write_map_gltf(&wad, map, &texture_queue, &texture_loader, output);
+    write_map_gltf(map, &texture_queue, &texture_loader, output);
 }
