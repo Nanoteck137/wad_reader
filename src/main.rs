@@ -14,6 +14,9 @@ mod gltf;
 mod util;
 mod wad;
 
+/// TODO(patrik):
+///   - Lazy loading textures
+
 fn read_file<P>(path: P) -> Vec<u8>
 where
     P: AsRef<Path>,
@@ -30,86 +33,144 @@ struct TextureLoader {
     color_map: ColorMap,
     palette: Palette,
 
-    textures: HashMap<String, Texture>,
-
-    patch_start: usize,
-    patch_end: usize,
-    flat_start: usize,
-    flat_end: usize,
+    textures: Vec<(String, Texture)>,
 }
 
 impl TextureLoader {
     fn new(wad: &Wad, color_map: ColorMap, palette: Palette) -> Option<Self> {
         assert!(!wad.find_dir("P3_START").is_ok());
 
-        let patch_start = wad.find_dir("P_START").ok()?;
-        let patch_end = wad.find_dir("P_END").ok()?;
-        assert!(patch_start < patch_end);
-
-        let flat_start = wad.find_dir("F_START").ok()?;
-        let flat_end = wad.find_dir("F_END").ok()?;
-        assert!(flat_start < flat_end);
-
-        let patch_names =
-            read_patch_names(&wad).expect("Failed to load patch names");
-        // println!("Patch Names: {:#?}", patch_names);
-
-        // assert!(!wad.find_dir("TEXTURE2").is_ok());
-        let texture_defs =
-            read_texture_defs(&wad).expect("Failed to read texture defs");
-        let textures = process_texture_defs(
-            &wad,
-            &patch_names,
-            &texture_defs,
-            &color_map,
-            &palette,
-        );
-
-        Some(Self {
+        let mut result = Self {
             color_map,
             palette,
 
-            textures,
+            textures: Vec::new(),
+        };
 
-            patch_start,
-            patch_end,
-            flat_start,
-            flat_end,
-        })
+        result.load_all_patches(wad);
+        result.load_all_flats(wad);
+        result.load_all_textures(wad);
+
+        Some(result)
     }
 
-    fn is_patch(&self, index: usize) -> bool {
-        index > self.patch_start && index < self.patch_end
-    }
+    fn load_all_patches(&mut self, wad: &wad::Wad) {
+        let start = wad.find_dir("P_START").unwrap();
+        let start = start + 1;
+        let end = wad.find_dir("P_END").unwrap();
+        assert!(start < end);
 
-    fn is_flat(&self, index: usize) -> bool {
-        index > self.flat_start && index < self.flat_end
-    }
+        for index in start..end {
+            // TODO(patrik): Remove unwarp
+            let entry = wad.read_dir_entry(index).unwrap();
 
-    fn load(&self, wad: &Wad, name: &str) -> Option<Texture> {
-        let dir_index = wad.find_dir(name);
+            let null_pos = entry
+                .name
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(entry.name.len());
+            let entry_name = &entry.name[..null_pos];
+            let entry_name = std::str::from_utf8(&entry_name)
+                .expect("Failed to convert floor texture name to str");
 
-        if let Some(dir_index) = dir_index.ok() {
-            if self.is_patch(dir_index) {
-                return read_patch_texture(
-                    wad,
-                    name,
-                    &self.color_map,
-                    &self.palette,
-                );
-            } else if self.is_flat(dir_index) {
-                return read_flat_texture(
-                    wad,
-                    name,
-                    &self.color_map,
-                    &self.palette,
-                );
-            } else {
-                panic!("{} is not flat or patch", name);
+            let skip = ["P1_START", "P1_END", "P2_START", "P2_END"]
+                .iter()
+                .any(|s| *s == entry_name);
+            if skip {
+                continue;
             }
-        } else {
-            return Some(self.textures.get(&name.to_string())?.clone());
+
+            // TODO(patrik): Remove unwarp
+            let texture = read_patch_texture(
+                wad,
+                entry_name,
+                &self.color_map,
+                &self.palette,
+            )
+            .unwrap();
+
+            self.add_texture(entry_name, texture);
         }
+    }
+
+    fn load_all_flats(&mut self, wad: &wad::Wad) {
+        let start = wad.find_dir("F_START").unwrap();
+        let start = start + 1;
+        let end = wad.find_dir("F_END").unwrap();
+        assert!(start < end);
+
+        for index in start..end {
+            // TODO(patrik): Remove unwarp
+            let entry = wad.read_dir_entry(index).unwrap();
+
+            let null_pos = entry
+                .name
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(entry.name.len());
+            let entry_name = &entry.name[..null_pos];
+            let entry_name = std::str::from_utf8(&entry_name)
+                .expect("Failed to convert floor texture name to str");
+
+            let skip = ["F1_START", "F1_END", "F2_START", "F2_END"]
+                .iter()
+                .any(|s| *s == entry_name);
+            if skip {
+                continue;
+            }
+
+            // TODO(patrik): Remove unwarp
+            let texture = read_flat_texture(
+                wad,
+                entry_name,
+                &self.color_map,
+                &self.palette,
+            )
+            .unwrap();
+
+            self.add_texture(entry_name, texture);
+        }
+    }
+
+    fn load_all_textures(&mut self, wad: &wad::Wad) {
+        let patch_names =
+            read_patch_names(&wad).expect("Failed to load patch names");
+
+        let texture_defs =
+            read_texture_defs(&wad).expect("Failed to read texture defs");
+
+        let textures = process_texture_defs(
+            &wad,
+            self,
+            &patch_names,
+            &texture_defs,
+            &self.color_map,
+            &self.palette,
+        );
+
+        for (name, texture) in textures {
+            self.add_texture(&name, texture);
+        }
+    }
+
+    fn add_texture(&mut self, name: &str, texture: Texture) {
+        if self.textures.iter().any(|t| t.0 == name) {
+            // TODO(patrik): Check texture if they are the same?
+            eprintln!("Warning: Duplicate texture '{}'", name);
+            return;
+        }
+
+        self.textures.push((name.to_string(), texture));
+    }
+
+    fn load(&self, name: &str) -> Option<&Texture> {
+        for (texture_name, texture) in &self.textures {
+            if texture_name == name {
+                return Some(texture);
+            }
+        }
+
+        None
     }
 }
 
@@ -266,7 +327,7 @@ fn generate_sector_floor(
     mesh.texture_id = texture_id;
 
     let name = texture_queue.get_name_from_id(texture_id.unwrap()).unwrap();
-    let texture = texture_loader.load(wad, name).unwrap();
+    let texture = texture_loader.load(name).unwrap();
 
     let w = 1.0 / texture.width as f32;
     let h = 1.0 / texture.height as f32;
@@ -307,7 +368,7 @@ fn generate_sector_ceiling(
     mesh.texture_id = texture_id;
 
     let name = texture_queue.get_name_from_id(texture_id.unwrap()).unwrap();
-    let texture = texture_loader.load(wad, name).unwrap();
+    let texture = texture_loader.load(name).unwrap();
 
     let w = 1.0 / texture.width as f32;
     let h = 1.0 / texture.height as f32;
@@ -384,7 +445,7 @@ fn create_normal_wall_quad(
     let texture_id =
         queue_texture(texture_queue, sidedef.middle_texture_name).unwrap();
     let name = texture_queue.get_name_from_id(texture_id).unwrap();
-    let texture = texture_loader.load(wad, name).unwrap();
+    let texture = texture_loader.load(name).unwrap();
 
     let x1 = start.x;
     let y1 = start.y;
@@ -449,7 +510,7 @@ fn gen_diff_wall(
     lower_quad: bool,
 ) -> Quad {
     let name = texture_queue.get_name_from_id(texture_id).unwrap();
-    let texture = texture_loader.load(wad, name).unwrap();
+    let texture = texture_loader.load(name).unwrap();
 
     let x1 = start.x;
     let y1 = start.y;
@@ -1070,94 +1131,105 @@ struct TextureDef {
     patches: Vec<PatchDef>,
 }
 
+fn process_texture_lump(
+    wad: &wad::Wad,
+    texture_defs: &mut Vec<TextureDef>,
+    index: usize,
+) -> Option<()> {
+    let data = wad.read_dir(index).unwrap();
+
+    let num_textures = u32::from_le_bytes(data[0..4].try_into().unwrap());
+    let num_textures = num_textures as usize;
+
+    let data_offset = 4;
+    for i in 0..num_textures {
+        let start = i * 4 + data_offset;
+
+        let offset =
+            u32::from_le_bytes(data[start..start + 4].try_into().unwrap());
+        let offset = offset as usize;
+
+        let name = &data[offset + 0..offset + 8];
+        let null_pos = name.iter().position(|&c| c == 0).unwrap_or(name.len());
+        let name = &name[..null_pos];
+        let name = std::str::from_utf8(name).ok()?;
+        let name = String::from(name);
+
+        let _masked =
+            u32::from_le_bytes(data[offset + 8..offset + 12].try_into().ok()?);
+
+        let width = u16::from_le_bytes(
+            data[offset + 12..offset + 14].try_into().ok()?,
+        );
+        let width = width as usize;
+        let height = u16::from_le_bytes(
+            data[offset + 14..offset + 16].try_into().ok()?,
+        );
+        let height = height as usize;
+
+        let _column_directory = u32::from_le_bytes(
+            data[offset + 16..offset + 20].try_into().ok()?,
+        );
+
+        let patch_count = u16::from_le_bytes(
+            data[offset + 20..offset + 22].try_into().ok()?,
+        );
+        let patch_count = patch_count as usize;
+
+        let mut patches = Vec::with_capacity(patch_count);
+
+        let offset = 22 + offset;
+        for pi in 0..patch_count {
+            let start = pi * 10 + offset;
+
+            let origin_x = i16::from_le_bytes(
+                data[start + 0..start + 2].try_into().ok()?,
+            );
+
+            let origin_y = i16::from_le_bytes(
+                data[start + 2..start + 4].try_into().ok()?,
+            );
+
+            let patch = u16::from_le_bytes(
+                data[start + 4..start + 6].try_into().ok()?,
+            );
+            let patch = patch as usize;
+
+            let _step_dir = u16::from_le_bytes(
+                data[start + 6..start + 8].try_into().ok()?,
+            );
+
+            let _color_map = u16::from_le_bytes(
+                data[start + 8..start + 10].try_into().ok()?,
+            );
+
+            patches.push(PatchDef {
+                patch,
+                origin_x,
+                origin_y,
+            });
+        }
+
+        texture_defs.push(TextureDef {
+            name,
+            width,
+            height,
+            patches,
+        });
+    }
+
+    Some(())
+}
+
 fn read_texture_defs(wad: &Wad) -> Option<Vec<TextureDef>> {
     let mut texture_defs = Vec::new();
 
     if let Ok(index) = wad.find_dir("TEXTURE1") {
-        let data = wad.read_dir(index).unwrap();
+        process_texture_lump(wad, &mut texture_defs, index)?;
+    }
 
-        let num_textures = u32::from_le_bytes(data[0..4].try_into().unwrap());
-        let num_textures = num_textures as usize;
-        println!("Num Textures: {}", num_textures);
-
-        let data_offset = 4;
-        for i in 0..num_textures {
-            let start = i * 4 + data_offset;
-
-            let offset =
-                u32::from_le_bytes(data[start..start + 4].try_into().unwrap());
-            let offset = offset as usize;
-
-            let name = &data[offset + 0..offset + 8];
-            let null_pos =
-                name.iter().position(|&c| c == 0).unwrap_or(name.len());
-            let name = &name[..null_pos];
-            let name = std::str::from_utf8(name).ok()?;
-            let name = String::from(name);
-
-            let masked = u32::from_le_bytes(
-                data[offset + 8..offset + 12].try_into().ok()?,
-            );
-
-            let width = u16::from_le_bytes(
-                data[offset + 12..offset + 14].try_into().ok()?,
-            );
-            let width = width as usize;
-            let height = u16::from_le_bytes(
-                data[offset + 14..offset + 16].try_into().ok()?,
-            );
-            let height = height as usize;
-
-            let _column_directory = u32::from_le_bytes(
-                data[offset + 16..offset + 20].try_into().ok()?,
-            );
-
-            let patch_count = u16::from_le_bytes(
-                data[offset + 20..offset + 22].try_into().ok()?,
-            );
-            let patch_count = patch_count as usize;
-
-            let mut patches = Vec::with_capacity(patch_count);
-
-            let offset = 22 + offset;
-            for pi in 0..patch_count {
-                let start = pi * 10 + offset;
-
-                let origin_x = i16::from_le_bytes(
-                    data[start + 0..start + 2].try_into().ok()?,
-                );
-
-                let origin_y = i16::from_le_bytes(
-                    data[start + 2..start + 4].try_into().ok()?,
-                );
-
-                let patch = u16::from_le_bytes(
-                    data[start + 4..start + 6].try_into().ok()?,
-                );
-                let patch = patch as usize;
-
-                let _step_dir = u16::from_le_bytes(
-                    data[start + 6..start + 8].try_into().ok()?,
-                );
-
-                let _color_map = u16::from_le_bytes(
-                    data[start + 8..start + 10].try_into().ok()?,
-                );
-
-                patches.push(PatchDef {
-                    patch,
-                    origin_x,
-                    origin_y,
-                });
-            }
-
-            texture_defs.push(TextureDef {
-                name,
-                width,
-                height,
-                patches,
-            });
-        }
+    if let Ok(index) = wad.find_dir("TEXTURE2") {
+        process_texture_lump(wad, &mut texture_defs, index)?;
     }
 
     Some(texture_defs)
@@ -1165,6 +1237,7 @@ fn read_texture_defs(wad: &Wad) -> Option<Vec<TextureDef>> {
 
 fn process_texture_defs(
     wad: &Wad,
+    texture_loader: &TextureLoader,
     patch_names: &Vec<String>,
     texture_defs: &Vec<TextureDef>,
     color_map: &ColorMap,
@@ -1177,9 +1250,13 @@ fn process_texture_defs(
         for patch in &def.patches {
             let patch_name = &patch_names[patch.patch];
 
-            let texture =
-                read_patch_texture(wad, &patch_name, color_map, palette)
-                    .expect("Failed to read patch texture");
+            // let texture =
+            //     read_patch_texture(wad, &patch_name, color_map, palette)
+            //         .expect("Failed to read patch texture");
+
+            let texture = texture_loader
+                .load(&patch_name)
+                .expect("Failed to read patch texture");
 
             let xoff = patch.origin_x as isize;
             let yoff = patch.origin_y as isize;
@@ -1808,7 +1885,7 @@ fn write_map_gltf<P>(
 
     let mut textures = Vec::new();
     for t in &texture_queue.textures {
-        if let Some(texture) = texture_loader.load(&wad, &t) {
+        if let Some(texture) = texture_loader.load(&t) {
             println!("{}: {}, {}", t, texture.width, texture.height);
 
             let mut result = Vec::new();
@@ -1963,21 +2040,7 @@ fn main() {
     let path = format!("test/TITLEPIC.png");
     write_texture_to_png(&path, &texture);
 
-    let patch_names =
-        read_patch_names(&wad).expect("Failed to load patch names");
-    // println!("Patch Names: {:#?}", patch_names);
-
-    // assert!(!wad.find_dir("TEXTURE2").is_ok());
-    let texture_defs =
-        read_texture_defs(&wad).expect("Failed to read texture defs");
-    let textures = process_texture_defs(
-        &wad,
-        &patch_names,
-        &texture_defs,
-        final_color_map,
-        final_palette,
-    );
-    write_all_textures(&textures);
+    // texture_loader.debug_write_textures();
 
     let map = if let Some(map) = args.map.as_ref() {
         map.as_str()

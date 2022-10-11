@@ -35,7 +35,7 @@ const VERT_IS_GL: usize = 1 << 15;
 pub struct Dir {
     data_offset: usize,
     data_size: usize,
-    name: [u8; 8],
+    pub name: [u8; 8],
 }
 
 pub struct Wad<'a> {
