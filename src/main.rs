@@ -314,7 +314,6 @@ fn queue_texture(
 }
 
 fn generate_sector_floor(
-    wad: &wad::Wad,
     map: &wad::Map,
     texture_loader: &TextureLoader,
     texture_queue: &mut TextureQueue,
@@ -355,7 +354,6 @@ fn generate_sector_floor(
 }
 
 fn generate_sector_ceiling(
-    wad: &wad::Wad,
     map: &wad::Map,
     texture_loader: &TextureLoader,
     texture_queue: &mut TextureQueue,
@@ -435,7 +433,6 @@ fn update_uv(
 }
 
 fn create_normal_wall_quad(
-    wad: &wad::Wad,
     texture_loader: &TextureLoader,
     texture_queue: &mut TextureQueue,
     sector: &wad::Sector,
@@ -497,7 +494,6 @@ fn create_normal_wall_quad(
 }
 
 fn gen_diff_wall(
-    wad: &wad::Wad,
     texture_loader: &TextureLoader,
     texture_queue: &TextureQueue,
     texture_id: usize,
@@ -624,7 +620,6 @@ fn gen_slope(
 }
 
 fn generate_sector_wall(
-    wad: &wad::Wad,
     map: &wad::Map,
     texture_loader: &TextureLoader,
     texture_queue: &mut TextureQueue,
@@ -650,7 +645,6 @@ fn generate_sector_wall(
                         let sidedef = map.sidedefs[sidedef];
 
                         let quad = create_normal_wall_quad(
-                            wad,
                             texture_loader,
                             texture_queue,
                             sector,
@@ -699,7 +693,6 @@ fn generate_sector_wall(
                         .unwrap_or(0);
 
                         let quad = gen_diff_wall(
-                            wad,
                             texture_loader,
                             texture_queue,
                             texture_id,
@@ -731,7 +724,6 @@ fn generate_sector_wall(
                         .unwrap_or(0);
 
                         let quad = gen_diff_wall(
-                            wad,
                             texture_loader,
                             texture_queue,
                             texture_id,
@@ -757,24 +749,18 @@ fn generate_sector_wall(
 }
 
 fn generate_sector_from_wad(
-    wad: &wad::Wad,
     map: &wad::Map,
     texture_loader: &TextureLoader,
     texture_queue: &mut TextureQueue,
     sector: &wad::Sector,
 ) -> Sector {
     let floor_mesh =
-        generate_sector_floor(wad, map, texture_loader, texture_queue, sector);
-    let ceiling_mesh = generate_sector_ceiling(
-        wad,
-        map,
-        texture_loader,
-        texture_queue,
-        sector,
-    );
+        generate_sector_floor(map, texture_loader, texture_queue, sector);
+    let ceiling_mesh =
+        generate_sector_ceiling(map, texture_loader, texture_queue, sector);
 
     let (wall_quads, slope_quads) =
-        generate_sector_wall(wad, map, texture_loader, texture_queue, sector);
+        generate_sector_wall(map, texture_loader, texture_queue, sector);
 
     Sector::new(floor_mesh, ceiling_mesh, wall_quads, slope_quads)
 }
@@ -791,13 +777,8 @@ fn generate_3d_map(
 
     let mut sectors = Vec::new();
 
-    // let map_sector =
-    //     generate_sector_from_wad(&map, texture_queue, &map.sectors[50]);
-    // sectors.push(map_sector);
-
     for sector in &map.sectors {
         let map_sector = generate_sector_from_wad(
-            wad,
             &map,
             texture_loader,
             texture_queue,
