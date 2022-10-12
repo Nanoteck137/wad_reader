@@ -1,9 +1,22 @@
 //! Module to handle WAD files
 
-pub const LINEDEF_FLAG_IMPASSABLE:    usize = 0x0001;
-pub const LINEDEF_FLAG_TWO_SIDED:     usize = 0x0004;
-pub const LINEDEF_FLAG_SHOW_MAP:      usize = 0x0080;
-pub const LINEDEF_FLAG_DONT_SHOW_MAP: usize = 0x0100;
+#![allow(dead_code)]
+
+use crate::util;
+use bitflags::bitflags;
+
+bitflags! {
+    pub struct LinedefFlags: usize {
+        const IMPASSABLE = 0x0001;
+        const TWO_SIDED = 0x0004;
+        const UPPER_TEXTURE_UNPEGGED = 0x0008;
+        const LOWER_TEXTURE_UNPEGGED = 0x0010;
+        const SECRET = 0x0020;
+        const BLOCKS_SOUND = 0x0020;
+        const NEVER_SHOW_ON_AUTOMAP = 0x0080;
+        const ALWAYS_SHOWS_ON_AUTOMAP = 0x0100;
+    }
+}
 
 #[derive(Copy, Clone, Debug)]
 pub enum Error {
@@ -29,7 +42,7 @@ const VERT_IS_GL: usize = 1 << 15;
 pub struct Dir {
     data_offset: usize,
     data_size: usize,
-    name: [u8; 8],
+    pub name: [u8; 8],
 }
 
 pub struct Wad<'a> {
@@ -49,21 +62,28 @@ impl<'a> Wad<'a> {
         }
 
         let num_dirs = i32::from_le_bytes(
-            bytes[4..8].try_into().map_err(|_| Error::ArrayConvertionFailed)?);
-        let num_dirs: usize = num_dirs.try_into()
+            bytes[4..8]
+                .try_into()
+                .map_err(|_| Error::ArrayConvertionFailed)?,
+        );
+        let num_dirs: usize = num_dirs
+            .try_into()
             .map_err(|_| Error::ConvertToUsizeFailed)?;
 
         let dir_start = i32::from_le_bytes(
-            bytes[8..12].try_into()
-                .map_err(|_| Error::ArrayConvertionFailed)?);
-        let dir_start: usize =
-            dir_start.try_into().map_err(|_| Error::ConvertToUsizeFailed)?;
+            bytes[8..12]
+                .try_into()
+                .map_err(|_| Error::ArrayConvertionFailed)?,
+        );
+        let dir_start: usize = dir_start
+            .try_into()
+            .map_err(|_| Error::ConvertToUsizeFailed)?;
 
         Ok(Self {
             bytes,
 
             num_dirs,
-            dir_start
+            dir_start,
         })
     }
 
@@ -76,14 +96,22 @@ impl<'a> Wad<'a> {
         let bytes = &self.bytes[start..start + 16];
 
         let data_offset = i32::from_le_bytes(
-            bytes[0..4].try_into().map_err(|_| Error::ArrayConvertionFailed)?);
-        let data_offset: usize =
-            data_offset.try_into().map_err(|_| Error::ConvertToUsizeFailed)?;
+            bytes[0..4]
+                .try_into()
+                .map_err(|_| Error::ArrayConvertionFailed)?,
+        );
+        let data_offset: usize = data_offset
+            .try_into()
+            .map_err(|_| Error::ConvertToUsizeFailed)?;
 
         let data_size = i32::from_le_bytes(
-            bytes[4..8].try_into().map_err(|_| Error::ArrayConvertionFailed)?);
-        let data_size: usize =
-            data_size.try_into().map_err(|_| Error::ConvertToUsizeFailed)?;
+            bytes[4..8]
+                .try_into()
+                .map_err(|_| Error::ArrayConvertionFailed)?,
+        );
+        let data_size: usize = data_size
+            .try_into()
+            .map_err(|_| Error::ConvertToUsizeFailed)?;
 
         let name = &bytes[8..16];
         let name: [u8; 8] =
@@ -111,9 +139,8 @@ impl<'a> Wad<'a> {
             };
 
             let len = find_zero(&dir_entry.name);
-            let dir_name =
-                std::str::from_utf8(&dir_entry.name[0..len])
-                    .map_err(|_| Error::BytesToStrFailed)?;
+            let dir_name = std::str::from_utf8(&dir_entry.name[0..len])
+                .map_err(|_| Error::BytesToStrFailed)?;
             if dir_name == name {
                 return Ok(index);
             }
@@ -143,9 +170,7 @@ pub struct Vertex {
 
 impl Vertex {
     fn new(x: f32, y: f32) -> Self {
-        Self {
-            x, y
-        }
+        Self { x, y }
     }
 }
 
@@ -157,37 +182,65 @@ pub struct Line {
 
 impl Line {
     fn new(start_vertex: usize, end_vertex: usize) -> Self {
-        Self { start_vertex, end_vertex }
+        Self {
+            start_vertex,
+            end_vertex,
+        }
     }
 }
 
 #[derive(Copy, Clone, Debug)]
 pub struct Linedef {
     pub line: Line,
-    pub flags: usize,
+    pub flags: LinedefFlags,
     pub front_sidedef: Option<usize>,
     pub back_sidedef: Option<usize>,
 }
 
 impl Linedef {
-    fn new(line: Line,
-           flags: usize,
-           front_sidedef: Option<usize>,
-           back_sidedef: Option<usize>)
-        -> Self
-    {
-        Self { line, flags, front_sidedef, back_sidedef }
+    fn new(
+        line: Line,
+        flags: LinedefFlags,
+        front_sidedef: Option<usize>,
+        back_sidedef: Option<usize>,
+    ) -> Self {
+        Self {
+            line,
+            flags,
+            front_sidedef,
+            back_sidedef,
+        }
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct Sidedef {
+    pub x_offset: i16,
+    pub y_offset: i16,
     pub sector: usize,
+
+    pub upper_texture: String,
+    pub middle_texture: String,
+    pub lower_texture: String,
 }
 
 impl Sidedef {
-    fn new(sector: usize) -> Self {
-        Self { sector }
+    fn new(
+        x_offset: i16,
+        y_offset: i16,
+        sector: usize,
+        upper_texture: String,
+        middle_texture: String,
+        lower_texture: String,
+    ) -> Self {
+        Self {
+            x_offset,
+            y_offset,
+            sector,
+            upper_texture,
+            middle_texture,
+            lower_texture,
+        }
     }
 }
 
@@ -196,26 +249,26 @@ pub struct Sector {
     pub floor_height: f32,
     pub ceiling_height: f32,
 
-    pub floor_texture_name: [u8; 8],
-    pub ceiling_texture_name: [u8; 8],
+    pub floor_texture: String,
+    pub ceiling_texture: String,
 
     pub lines: Vec<Linedef>,
     pub sub_sectors: Vec<SubSector>,
 }
 
 impl Sector {
-    fn new(floor_height: f32,
-           ceiling_height: f32,
-           floor_texture_name: [u8; 8],
-           ceiling_texture_name: [u8; 8])
-        -> Self
-    {
+    fn new(
+        floor_height: f32,
+        ceiling_height: f32,
+        floor_texture: String,
+        ceiling_texture: String,
+    ) -> Self {
         Self {
             floor_height,
             ceiling_height,
 
-            floor_texture_name,
-            ceiling_texture_name,
+            floor_texture,
+            ceiling_texture,
 
             lines: Vec::new(),
             sub_sectors: Vec::new(),
@@ -246,23 +299,26 @@ pub struct Segment {
 }
 
 impl Segment {
-    fn new(start_vertex: usize, end_vertex: usize,
-           linedef: usize,
-           side: usize,
-           partner_segment: usize)
-        -> Self
-    {
+    fn new(
+        start_vertex: usize,
+        end_vertex: usize,
+        linedef: usize,
+        side: usize,
+        partner_segment: usize,
+    ) -> Self {
         Self {
             start_vertex,
             end_vertex,
             linedef,
             side,
-            partner_segment
+            partner_segment,
         }
     }
 }
 
 pub struct Map {
+    pub name: String,
+
     pub vertices: Vec<Vertex>,
     pub gl_vertices: Vec<Vertex>,
 
@@ -277,6 +333,8 @@ pub struct Map {
 impl Map {
     pub fn parse_from_wad(wad: &Wad, map_name: &str) -> Result<Self> {
         let mut res = Self {
+            name: map_name.to_string(),
+
             vertices: Vec::new(),
             gl_vertices: Vec::new(),
 
@@ -314,11 +372,15 @@ impl Map {
                 let data = &data[start..start + 4];
 
                 let x = i16::from_le_bytes(
-                    data[0..2].try_into()
-                        .map_err(|_| Error::ArrayConvertionFailed)?);
+                    data[0..2]
+                        .try_into()
+                        .map_err(|_| Error::ArrayConvertionFailed)?,
+                );
                 let y = i16::from_le_bytes(
-                    data[2..4].try_into()
-                        .map_err(|_| Error::ArrayConvertionFailed)?);
+                    data[2..4]
+                        .try_into()
+                        .map_err(|_| Error::ArrayConvertionFailed)?,
+                );
 
                 let x: f32 =
                     x.try_into().map_err(|_| Error::ConvertToF32Failed)?;
@@ -345,11 +407,15 @@ impl Map {
                 let data = &data[start..start + 8];
 
                 let x = i32::from_le_bytes(
-                    data[0..4].try_into()
-                        .map_err(|_| Error::ArrayConvertionFailed)?);
+                    data[0..4]
+                        .try_into()
+                        .map_err(|_| Error::ArrayConvertionFailed)?,
+                );
                 let y = i32::from_le_bytes(
-                    data[4..8].try_into()
-                        .map_err(|_| Error::ArrayConvertionFailed)?);
+                    data[4..8]
+                        .try_into()
+                        .map_err(|_| Error::ArrayConvertionFailed)?,
+                );
 
                 let x = x as f32 / 65536.0;
                 let y = y as f32 / 65536.0;
@@ -371,50 +437,72 @@ impl Map {
             let data = &data[start..start + 14];
 
             let start_vertex = i16::from_le_bytes(
-                data[0..2].try_into()
-                    .map_err(|_| Error::ArrayConvertionFailed)?);
+                data[0..2]
+                    .try_into()
+                    .map_err(|_| Error::ArrayConvertionFailed)?,
+            );
             let end_vertex = i16::from_le_bytes(
-                data[2..4].try_into()
-                    .map_err(|_| Error::ArrayConvertionFailed)?);
+                data[2..4]
+                    .try_into()
+                    .map_err(|_| Error::ArrayConvertionFailed)?,
+            );
 
             let flags = i32::from_le_bytes(
-                data[4..8].try_into()
-                    .map_err(|_| Error::ArrayConvertionFailed)?);
+                data[4..8]
+                    .try_into()
+                    .map_err(|_| Error::ArrayConvertionFailed)?,
+            );
 
             let front_sidedef = i16::from_le_bytes(
-                data[10..12].try_into()
-                    .map_err(|_| Error::ArrayConvertionFailed)?);
+                data[10..12]
+                    .try_into()
+                    .map_err(|_| Error::ArrayConvertionFailed)?,
+            );
             let back_sidedef = i16::from_le_bytes(
-                data[12..14].try_into()
-                    .map_err(|_| Error::ArrayConvertionFailed)?);
+                data[12..14]
+                    .try_into()
+                    .map_err(|_| Error::ArrayConvertionFailed)?,
+            );
 
-            let start_vertex: usize =
-                start_vertex.try_into()
-                    .map_err(|_| Error::ConvertToUsizeFailed)?;
-            let end_vertex: usize =
-                end_vertex.try_into()
-                    .map_err(|_| Error::ConvertToUsizeFailed)?;
+            let start_vertex: usize = start_vertex
+                .try_into()
+                .map_err(|_| Error::ConvertToUsizeFailed)?;
+            let end_vertex: usize = end_vertex
+                .try_into()
+                .map_err(|_| Error::ConvertToUsizeFailed)?;
 
             let flags: usize =
                 flags.try_into().map_err(|_| Error::ConvertToUsizeFailed)?;
+            let flags = LinedefFlags::from_bits_truncate(flags);
 
             let line = Line::new(start_vertex, end_vertex);
 
             let front_sidedef = if front_sidedef == -1 {
                 None
             } else {
-                Some(front_sidedef.try_into()
-                        .map_err(|_| Error::ConvertToUsizeFailed)?)
+                Some(
+                    front_sidedef
+                        .try_into()
+                        .map_err(|_| Error::ConvertToUsizeFailed)?,
+                )
             };
 
             let back_sidedef = if back_sidedef == -1 {
                 None
             } else {
-                Some(back_sidedef.try_into()
-                        .map_err(|_| Error::ConvertToUsizeFailed)?)
+                Some(
+                    back_sidedef
+                        .try_into()
+                        .map_err(|_| Error::ConvertToUsizeFailed)?,
+                )
             };
 
-            self.linedefs.push(Linedef::new(line, flags, front_sidedef, back_sidedef));
+            self.linedefs.push(Linedef::new(
+                line,
+                flags,
+                front_sidedef,
+                back_sidedef,
+            ));
         }
 
         Ok(())
@@ -428,14 +516,50 @@ impl Map {
             let start = index * 30;
             let data = &data[start..start + 30];
 
+            let x_offset = i16::from_le_bytes(
+                data[0..2]
+                    .try_into()
+                    .map_err(|_| Error::ArrayConvertionFailed)?,
+            );
+
+            let y_offset = i16::from_le_bytes(
+                data[2..4]
+                    .try_into()
+                    .map_err(|_| Error::ArrayConvertionFailed)?,
+            );
+
+            let upper_texture: [u8; 8] = data[4..12]
+                .try_into()
+                .map_err(|_| Error::ArrayConvertionFailed)?;
+            let upper_texture = util::array_to_string(&upper_texture);
+
+            let lower_texture: [u8; 8] = data[12..20]
+                .try_into()
+                .map_err(|_| Error::ArrayConvertionFailed)?;
+            let lower_texture = util::array_to_string(&lower_texture);
+
+            let middle_texture: [u8; 8] = data[20..28]
+                .try_into()
+                .map_err(|_| Error::ArrayConvertionFailed)?;
+            let middle_texture = util::array_to_string(&middle_texture);
+
             let sector = i16::from_le_bytes(
-                data[28..30].try_into()
-                    .map_err(|_| Error::ArrayConvertionFailed)?);
+                data[28..30]
+                    .try_into()
+                    .map_err(|_| Error::ArrayConvertionFailed)?,
+            );
 
             let sector: usize =
                 sector.try_into().map_err(|_| Error::ConvertToUsizeFailed)?;
 
-            self.sidedefs.push(Sidedef::new(sector));
+            self.sidedefs.push(Sidedef::new(
+                x_offset,
+                y_offset,
+                sector,
+                upper_texture,
+                middle_texture,
+                lower_texture,
+            ));
         }
 
         Ok(())
@@ -450,29 +574,40 @@ impl Map {
             let data = &data[start..start + 26];
 
             let floor_height = i16::from_le_bytes(
-                data[0..2].try_into()
-                    .map_err(|_| Error::ArrayConvertionFailed)?);
+                data[0..2]
+                    .try_into()
+                    .map_err(|_| Error::ArrayConvertionFailed)?,
+            );
             let ceiling_height = i16::from_le_bytes(
-                data[2..4].try_into()
-                    .map_err(|_| Error::ArrayConvertionFailed)?);
+                data[2..4]
+                    .try_into()
+                    .map_err(|_| Error::ArrayConvertionFailed)?,
+            );
 
-            let floor_height: f32 =
-                floor_height.try_into()
-                    .map_err(|_| Error::ConvertToF32Failed)?;
+            let floor_height: f32 = floor_height
+                .try_into()
+                .map_err(|_| Error::ConvertToF32Failed)?;
 
-            let ceiling_height: f32 =
-                ceiling_height.try_into()
-                    .map_err(|_| Error::ConvertToF32Failed)?;
+            let ceiling_height: f32 = ceiling_height
+                .try_into()
+                .map_err(|_| Error::ConvertToF32Failed)?;
 
-            let floor_texture_name: [u8; 8] = data[4..12].try_into()
+            let floor_texture: [u8; 8] = data[4..12]
+                .try_into()
                 .map_err(|_| Error::ArrayConvertionFailed)?;
-            let ceiling_texture_name: [u8; 8] = data[12..20].try_into()
-                .map_err(|_| Error::ArrayConvertionFailed)?;
+            let floor_texture = util::array_to_string(&floor_texture);
 
-            self.sectors.push(Sector::new(floor_height,
-                                          ceiling_height,
-                                          floor_texture_name,
-                                          ceiling_texture_name));
+            let ceiling_texture: [u8; 8] = data[12..20]
+                .try_into()
+                .map_err(|_| Error::ArrayConvertionFailed)?;
+            let ceiling_texture = util::array_to_string(&ceiling_texture);
+
+            self.sectors.push(Sector::new(
+                floor_height,
+                ceiling_height,
+                floor_texture,
+                ceiling_texture,
+            ));
         }
 
         Ok(())
@@ -488,11 +623,15 @@ impl Map {
             let data = &data[start..start + 4];
 
             let count = u16::from_le_bytes(
-                data[0..2].try_into()
-                    .map_err(|_| Error::ArrayConvertionFailed)?);
+                data[0..2]
+                    .try_into()
+                    .map_err(|_| Error::ArrayConvertionFailed)?,
+            );
             let start = u16::from_le_bytes(
-                data[2..4].try_into()
-                    .map_err(|_| Error::ArrayConvertionFailed)?);
+                data[2..4]
+                    .try_into()
+                    .map_err(|_| Error::ArrayConvertionFailed)?,
+            );
 
             let start: usize =
                 start.try_into().map_err(|_| Error::ConvertToUsizeFailed)?;
@@ -516,46 +655,58 @@ impl Map {
             let data = &data[start..start + 10];
 
             let start_vertex = u16::from_le_bytes(
-                data[0..2].try_into()
-                    .map_err(|_| Error::ArrayConvertionFailed)?);
+                data[0..2]
+                    .try_into()
+                    .map_err(|_| Error::ArrayConvertionFailed)?,
+            );
             let end_vertex = u16::from_le_bytes(
-                data[2..4].try_into()
-                    .map_err(|_| Error::ArrayConvertionFailed)?);
+                data[2..4]
+                    .try_into()
+                    .map_err(|_| Error::ArrayConvertionFailed)?,
+            );
 
             let linedef = u16::from_le_bytes(
-                data[4..6].try_into()
-                    .map_err(|_| Error::ArrayConvertionFailed)?);
+                data[4..6]
+                    .try_into()
+                    .map_err(|_| Error::ArrayConvertionFailed)?,
+            );
             let side = u16::from_le_bytes(
-                data[6..8].try_into()
-                    .map_err(|_| Error::ArrayConvertionFailed)?);
+                data[6..8]
+                    .try_into()
+                    .map_err(|_| Error::ArrayConvertionFailed)?,
+            );
             let partner_segment = u16::from_le_bytes(
-                data[8..10].try_into()
-                    .map_err(|_| Error::ArrayConvertionFailed)?);
+                data[8..10]
+                    .try_into()
+                    .map_err(|_| Error::ArrayConvertionFailed)?,
+            );
 
-            let start_vertex: usize =
-                start_vertex.try_into()
-                    .map_err(|_| Error::ConvertToUsizeFailed)?;
+            let start_vertex: usize = start_vertex
+                .try_into()
+                .map_err(|_| Error::ConvertToUsizeFailed)?;
 
-            let end_vertex: usize =
-                end_vertex.try_into()
-                    .map_err(|_| Error::ConvertToUsizeFailed)?;
+            let end_vertex: usize = end_vertex
+                .try_into()
+                .map_err(|_| Error::ConvertToUsizeFailed)?;
 
-            let linedef: usize =
-                linedef.try_into()
-                    .map_err(|_| Error::ConvertToUsizeFailed)?;
+            let linedef: usize = linedef
+                .try_into()
+                .map_err(|_| Error::ConvertToUsizeFailed)?;
 
             let side: usize =
-                side.try_into()
-                    .map_err(|_| Error::ConvertToUsizeFailed)?;
+                side.try_into().map_err(|_| Error::ConvertToUsizeFailed)?;
 
-            let partner_segment: usize =
-                partner_segment.try_into()
-                    .map_err(|_| Error::ConvertToUsizeFailed)?;
+            let partner_segment: usize = partner_segment
+                .try_into()
+                .map_err(|_| Error::ConvertToUsizeFailed)?;
 
-            self.segments.push(Segment::new(start_vertex, end_vertex,
-                                            linedef,
-                                            side,
-                                            partner_segment));
+            self.segments.push(Segment::new(
+                start_vertex,
+                end_vertex,
+                linedef,
+                side,
+                partner_segment,
+            ));
         }
 
         Ok(())
@@ -564,17 +715,16 @@ impl Map {
     fn sort_subsectors(&mut self) -> Result<()> {
         for line in &self.linedefs {
             let sector = if let Some(side) = line.front_sidedef {
-                let side = self.sidedefs[side];
+                let side = &self.sidedefs[side];
                 Ok(side.sector)
             } else if let Some(side) = line.back_sidedef {
-                let side = self.sidedefs[side];
+                let side = &self.sidedefs[side];
                 Ok(side.sector)
             } else {
                 continue;
             }?;
 
             self.sectors[sector].lines.push(*line);
-
         }
 
         for sub_sector in &self.sub_sectors {
@@ -582,14 +732,18 @@ impl Map {
             if segment.linedef != 0xffff {
                 let linedef = self.linedefs[segment.linedef];
                 let sidedef = if segment.side == 0 {
-                    linedef.front_sidedef.ok_or(Error::FrontSideMismatch { side: segment.side })
+                    linedef
+                        .front_sidedef
+                        .ok_or(Error::FrontSideMismatch { side: segment.side })
                 } else if segment.side == 1 {
-                    linedef.back_sidedef.ok_or(Error::BackSideMismatch { side: segment.side })
+                    linedef
+                        .back_sidedef
+                        .ok_or(Error::BackSideMismatch { side: segment.side })
                 } else {
                     Err(Error::UnknownSide { side: segment.side })
                 }?;
 
-                let sidedef = self.sidedefs[sidedef];
+                let sidedef = &self.sidedefs[sidedef];
                 self.sectors[sidedef.sector].sub_sectors.push(*sub_sector);
             }
         }
