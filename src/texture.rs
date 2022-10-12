@@ -180,9 +180,9 @@ pub fn read_patch_texture(
         let height =
             u16::from_le_bytes(texture_data[2..4].try_into().unwrap());
 
-        let left_offset =
+        let _left_offset =
             i16::from_le_bytes(texture_data[4..6].try_into().unwrap());
-        let top_offset =
+        let _top_offset =
             i16::from_le_bytes(texture_data[6..8].try_into().unwrap());
 
         let width = width as usize;

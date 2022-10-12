@@ -4,10 +4,10 @@ use std::collections::HashMap;
 use clap::Parser;
 
 use wad::Wad;
-use math::{Vec2, Vec3, Vec4};
-use texture::{TextureLoader, Texture};
+use math::Vec4;
+use polygon::{Quad, Mesh};
+use texture::TextureLoader;
 use gltf::{Gltf, GltfTextureInfo};
-use polygon::{Quad, Mesh, Vertex};
 
 mod gen;
 mod gltf;
