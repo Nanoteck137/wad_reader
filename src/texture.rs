@@ -1,5 +1,7 @@
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use crate::wad::Wad;
+use crate::util;
 
 const MAX_PALETTE_COLORS: usize = 256;
 const MAX_COLOR_MAPS: usize = 34;
@@ -635,5 +637,22 @@ impl TextureLoader {
         }
 
         None
+    }
+
+    pub fn dump<P>(&self, output_dir: P)
+    where
+        P: AsRef<Path>,
+    {
+        let output_dir = PathBuf::from(output_dir.as_ref());
+        assert!(output_dir.exists());
+
+        for texture in &self.textures {
+            let mut path = output_dir.clone();
+            path.push(&texture.0);
+            path.set_extension("png");
+
+            let data = util::write_texture_to_png(&texture.1);
+            util::write_binary_file(path, &data);
+        }
     }
 }

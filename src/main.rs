@@ -1,21 +1,13 @@
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 use wad::Wad;
 use math::Vec4;
 use polygon::{Quad, Mesh};
 use texture::TextureLoader;
 use gltf::{Gltf, GltfTextureInfo};
-
-mod gen;
-mod gltf;
-mod math;
-mod polygon;
-mod texture;
-mod util;
-mod wad;
 
 /// TODO(patrik):
 ///   - Lazy loading textures
@@ -24,20 +16,32 @@ mod wad;
 ///     - View Slopes
 ///     - View Normals
 ///     - View UVs
+///
+mod gen;
+mod gltf;
+mod math;
+mod polygon;
+mod texture;
+mod util;
+mod wad;
 
+/// TODO Update commenets
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
     /// The WAD file to convert
     wad_file: String,
 
-    /// Write output file to <OUTPUT>
-    #[clap(short, long)]
-    output: Option<String>,
+    #[clap(long)]
+    dump_textures: bool,
 
     /// Which map to convert (example E1M1)
     #[clap(short, long)]
     map: Option<String>,
+
+    /// Write output file to <OUTPUT>
+    #[clap(value_parser, short, long)]
+    output_dir: Option<String>,
 }
 
 struct Sector {
@@ -213,12 +217,10 @@ fn main() {
     let args = Args::parse();
     println!("Args: {:?}", args);
 
-    let output = if let Some(output) = args.output {
-        PathBuf::from(output)
+    let output_dir = if let Some(output_dir) = args.output_dir {
+        PathBuf::from(output_dir)
     } else {
-        let mut path = PathBuf::from(args.wad_file.clone());
-        path.set_extension("glb");
-        path
+        PathBuf::from(".")
     };
 
     // Read the raw wad file
@@ -241,7 +243,13 @@ fn main() {
     )
     .expect("Failed to create TextureLoader");
 
-    // texture_loader.debug_write_textures();
+    if args.dump_textures {
+        let mut texture_dump_dir = output_dir.clone();
+        texture_dump_dir.push("dump");
+        texture_dump_dir.push("textures");
+        std::fs::create_dir_all(&texture_dump_dir).unwrap();
+        texture_loader.dump(&texture_dump_dir);
+    }
 
     let map = if let Some(map) = args.map.as_ref() {
         map.as_str()
@@ -251,7 +259,11 @@ fn main() {
         "E1M1"
     };
 
-    println!("Converting '{}' to mime map", map);
+    let mut output = output_dir.clone();
+    output.push(map);
+    output.set_extension("glb");
+
+    println!("Converting '{}' to GLTF", map);
 
     // Construct an map with map from the wad
     let wad_map =
