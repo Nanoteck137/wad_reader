@@ -9,10 +9,21 @@ const MAX_COLOR_MAPS: usize = 34;
 const FLAT_TEXTURE_WIDTH: usize = 64;
 const FLAT_TEXTURE_HEIGHT: usize = 64;
 
+struct Patch {
+    texture_id: usize,
+    origin_x: isize,
+    origin_y: isize,
+}
+
+struct TextureComposition {
+    patches: Vec<Patch>,
+}
+
 pub struct Texture {
     width: usize,
     height: usize,
     pixels: Vec<u8>,
+    composition: Option<TextureComposition>,
 }
 
 impl Texture {
@@ -21,6 +32,7 @@ impl Texture {
             width,
             height,
             pixels,
+            composition: None,
         }
     }
 
@@ -368,19 +380,28 @@ fn process_texture_defs(
     let mut result = HashMap::new();
 
     for def in texture_defs {
+        let mut patches = Vec::new();
         let mut pixels = vec![0u8; def.width * def.height * 4];
+
         for patch in &def.patches {
             let patch_name = &patch_names[patch.patch];
 
-            let (_, texture) = texture_loader
+            let (patch_texture_id, patch_texture) = texture_loader
                 .load_from_name(&patch_name)
                 .expect("Failed to read patch texture");
 
+            let patch_def = Patch {
+                texture_id: patch_texture_id,
+                origin_x: patch.origin_x as isize,
+                origin_y: patch.origin_y as isize,
+            };
+            patches.push(patch_def);
+
             let xoff = patch.origin_x as isize;
             let yoff = patch.origin_y as isize;
-            for sy in 0..texture.height() {
-                for sx in 0..texture.width() {
-                    let source_index = sx + sy * texture.width();
+            for sy in 0..patch_texture.height() {
+                for sx in 0..patch_texture.width() {
+                    let source_index = sx + sy * patch_texture.width();
 
                     let x = sx as isize + xoff;
                     let y = sy as isize + yoff;
@@ -395,7 +416,7 @@ fn process_texture_defs(
 
                     let dest_index = (x as usize) + (y as usize) * def.width;
 
-                    let texture_pixels = texture.pixels();
+                    let texture_pixels = patch_texture.pixels();
                     pixels[dest_index * 4 + 0] =
                         texture_pixels[source_index * 4 + 0];
                     pixels[dest_index * 4 + 1] =
@@ -408,7 +429,9 @@ fn process_texture_defs(
             }
         }
 
-        let new_texture = Texture::new(def.width, def.height, pixels);
+        let composition = TextureComposition { patches };
+        let mut new_texture = Texture::new(def.width, def.height, pixels);
+        new_texture.composition = Some(composition);
         result.insert(def.name.clone(), new_texture);
     }
 
@@ -645,6 +668,32 @@ impl TextureLoader {
     {
         let output_dir = PathBuf::from(output_dir.as_ref());
         assert!(output_dir.exists());
+
+        use serde_json::{Value, json};
+
+        let mut result = Vec::new();
+        for texture in &self.textures {
+            if let Some(comp) = texture.1.composition.as_ref() {
+                let patches = comp
+                    .patches
+                    .iter()
+                    .map(|patch| {
+                        let name =
+                            self.get_name_from_id(patch.texture_id).unwrap();
+                        json!({
+                            "texture_name": name,
+                            "origin_x": patch.origin_x,
+                            "origin_y": patch.origin_y,
+                        })
+                    })
+                    .collect::<Value>();
+                result.push(json!({ "name": texture.0, "patches": patches }));
+            }
+        }
+
+        let text = serde_json::to_string_pretty(&result).unwrap();
+        println!("{}", text);
+        panic!();
 
         for texture in &self.textures {
             let mut path = output_dir.clone();

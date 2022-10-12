@@ -1,2 +1,4 @@
 /target
+/dump
 .DS_Store
+*.glb
