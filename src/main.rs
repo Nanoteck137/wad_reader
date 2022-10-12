@@ -5,7 +5,7 @@ use clap::Parser;
 
 use wad::Wad;
 use math::{Vec2, Vec3, Vec4};
-use texture::{TextureLoader, TextureQueue, Texture};
+use texture::{TextureLoader, Texture};
 use gltf::{Gltf, GltfTextureInfo};
 use polygon::{Quad, Mesh, Vertex};
 
@@ -252,8 +252,6 @@ fn main() {
     };
 
     println!("Converting '{}' to mime map", map);
-
-    let texture_queue = TextureQueue::new();
 
     // Construct an map with map from the wad
     let wad_map =

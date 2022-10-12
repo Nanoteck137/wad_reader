@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use crate::wad;
 use crate::util;
-use crate::texture::{Texture, TextureLoader, TextureQueue};
+use crate::texture::{Texture, TextureLoader};
 use crate::polygon::{Mesh, Quad, Vertex};
 use crate::math::{Vec2, Vec3, Vec4};
 
