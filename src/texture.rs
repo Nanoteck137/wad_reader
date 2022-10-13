@@ -715,8 +715,10 @@ impl TextureLoader {
         }
 
         let text = serde_json::to_string_pretty(&result).unwrap();
-        println!("{}", text);
-        // panic!();
+        let mut path = output_dir.clone();
+        path.push("textures");
+        path.set_extension("json");
+        util::write_binary_file(path, text.as_bytes());
 
         let mut flat_output_dir = output_dir.clone();
         flat_output_dir.push("flats");
