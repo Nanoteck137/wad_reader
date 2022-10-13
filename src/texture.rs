@@ -10,7 +10,7 @@ const FLAT_TEXTURE_WIDTH: usize = 64;
 const FLAT_TEXTURE_HEIGHT: usize = 64;
 
 struct Patch {
-    texture_id: usize,
+    name: String,
     origin_x: isize,
     origin_y: isize,
 }
@@ -19,7 +19,15 @@ struct TextureComposition {
     patches: Vec<Patch>,
 }
 
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum TextureTyp {
+    Flat,
+    Patch,
+    Texture,
+}
+
 pub struct Texture {
+    typ: TextureTyp,
     width: usize,
     height: usize,
     pixels: Vec<u8>,
@@ -27,13 +35,23 @@ pub struct Texture {
 }
 
 impl Texture {
-    pub fn new(width: usize, height: usize, pixels: Vec<u8>) -> Self {
+    pub fn new(
+        typ: TextureTyp,
+        width: usize,
+        height: usize,
+        pixels: Vec<u8>,
+    ) -> Self {
         Self {
+            typ,
             width,
             height,
             pixels,
             composition: None,
         }
+    }
+
+    pub fn typ(&self) -> TextureTyp {
+        self.typ
     }
 
     pub fn width(&self) -> usize {
@@ -172,6 +190,7 @@ pub fn read_flat_texture(
         }
 
         return Some(Texture::new(
+            TextureTyp::Flat,
             FLAT_TEXTURE_WIDTH,
             FLAT_TEXTURE_HEIGHT,
             pixels,
@@ -247,7 +266,7 @@ pub fn read_patch_texture(
             }
         }
 
-        return Some(Texture::new(width, height, pixels));
+        return Some(Texture::new(TextureTyp::Patch, width, height, pixels));
     }
 
     None
@@ -386,12 +405,12 @@ fn process_texture_defs(
         for patch in &def.patches {
             let patch_name = &patch_names[patch.patch];
 
-            let (patch_texture_id, patch_texture) = texture_loader
+            let (_patch_texture_id, patch_texture) = texture_loader
                 .load_from_name(&patch_name)
                 .expect("Failed to read patch texture");
 
             let patch_def = Patch {
-                texture_id: patch_texture_id,
+                name: patch_name.clone(),
                 origin_x: patch.origin_x as isize,
                 origin_y: patch.origin_y as isize,
             };
@@ -430,7 +449,8 @@ fn process_texture_defs(
         }
 
         let composition = TextureComposition { patches };
-        let mut new_texture = Texture::new(def.width, def.height, pixels);
+        let mut new_texture =
+            Texture::new(TextureTyp::Texture, def.width, def.height, pixels);
         new_texture.composition = Some(composition);
         result.insert(def.name.clone(), new_texture);
     }
@@ -506,7 +526,7 @@ impl TextureLoader {
             textures: Vec::new(),
         };
 
-        result.load_missing_texture();
+        result.create_missing_texture();
         result.load_all_patches(wad);
         result.load_all_flats(wad);
         result.load_all_textures(wad);
@@ -514,7 +534,7 @@ impl TextureLoader {
         Some(result)
     }
 
-    fn load_missing_texture(&mut self) {
+    fn create_missing_texture(&mut self) {
         let mut pixels = vec![0; 2 * 2 * std::mem::size_of::<u32>()];
 
         let mut set_pixel = |index: usize, r, g, b| {
@@ -530,7 +550,7 @@ impl TextureLoader {
         set_pixel(3, 0x00, 0x00, 0x00);
 
         let id = self.textures.len();
-        let texture = Texture::new(2, 2, pixels);
+        let texture = Texture::new(TextureTyp::Texture, 2, 2, pixels);
         self.add_texture("MISSING_TEXTURE", texture);
         self.missing_texture_id = id;
     }
@@ -678,24 +698,46 @@ impl TextureLoader {
                     .patches
                     .iter()
                     .map(|patch| {
-                        let name =
-                            self.get_name_from_id(patch.texture_id).unwrap();
                         json!({
-                            "texture_name": name,
+                            "texture_name": patch.name,
                             "origin_x": patch.origin_x,
                             "origin_y": patch.origin_y,
                         })
                     })
                     .collect::<Value>();
-                result.push(json!({ "name": texture.0, "patches": patches }));
+                result.push(json!({
+                    "name": texture.0,
+                    "width": texture.1.width(),
+                    "height": texture.1.height(),
+                    "patches": patches
+                }));
             }
         }
 
         let text = serde_json::to_string_pretty(&result).unwrap();
         println!("{}", text);
-        panic!();
+        // panic!();
+
+        let mut flat_output_dir = output_dir.clone();
+        flat_output_dir.push("flats");
+
+        let mut patch_output_dir = output_dir.clone();
+        patch_output_dir.push("patches");
+
+        let mut texture_output_dir = output_dir.clone();
+        texture_output_dir.push("textures");
+
+        std::fs::create_dir_all(&flat_output_dir).unwrap();
+        std::fs::create_dir_all(&patch_output_dir).unwrap();
+        std::fs::create_dir_all(&texture_output_dir).unwrap();
 
         for texture in &self.textures {
+            let output_dir = match texture.1.typ() {
+                TextureTyp::Flat => &flat_output_dir,
+                TextureTyp::Patch => &patch_output_dir,
+                TextureTyp::Texture => &texture_output_dir,
+            };
+
             let mut path = output_dir.clone();
             path.push(&texture.0);
             path.set_extension("png");
